@@ -1,0 +1,71 @@
+# --- Python bytecode ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Package/build artifacts ---
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# --- Installer logs ---
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- Unit test / coverage ---
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+pytest_cache/
+nosetests.xml
+coverage.xml
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- IDE / Editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Environment / secrets ---
+.env
+.env.*
+*.env
+
+# --- MyPy / Pyright ---
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyright/
+
+# --- Pyre ---
+.pyre/
+
+# --- Ruff / Black / isort ---
+.ruff_cache/
+.black/
+.isort.cfg
+
+# --- Django / Flask ---
+*.log
+local_settings.py
+instance/
+*.sqlite3
+
+# --- OS noise ---
+.DS_Store
+Thumbs.db
