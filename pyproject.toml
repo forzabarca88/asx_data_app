@@ -1,0 +1,23 @@
+[project]
+name = "asx-history-ui"
+version = "0.1.0"
+description = "Modern Python web front-end for company/<id>/history"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "jinja2",
+    "httpx",
+    "pydantic",
+    "plotly"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx[http2]"
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

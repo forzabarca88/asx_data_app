@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>ASX Companies</h1>
+<ul>
+{% for code in codes %}
+    <li><a href="/company/{{ code }}">{{ code }}</a></li>
+{% endfor %}
+</ul>
+{% endblock %}
