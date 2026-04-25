@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>ASX Companies</h2>
+<p>Select a company to view its history:</p>
+
+<form action="/select-company" method="post">
+    <select name="code">
+        {% for company in companies %}
+        <option value="{{ company.code }}">{{ company.code }}</option>
+        {% endfor %}
+    </select>
+    <button type="submit">Select Company</button>
+</form>
+
+<h2>Company List</h2>
+<ul>
+    {% for company in companies %}
+    <li><a href="/company/{{ company.code }}">{{ company.code }}</a></li>
+    {% endfor %}
+</ul>
+{% endblock %}
