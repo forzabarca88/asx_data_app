@@ -1,0 +1,12 @@
+[project]
+name = "asx-data-app"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=3.0.2",
+    "plotly>=6.7.0",
+    "requests>=2.33.1",
+    "streamlit>=1.56.0",
+]
