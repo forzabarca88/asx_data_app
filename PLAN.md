@@ -1,806 +1,515 @@
-\# PLAN.md
+# PLAN.md
 
-
+---
 
 Modern Python web front-end for `company/<id>/history` with TDD and `uv`
 
+---
 
+## 1. Project setup
 
-\---
+### 1.1 Create repo and base structure
 
+- **Goal:** Have a clean, minimal project skeleton ready for TDD.
+- **Steps:**
 
+  1. Create project directory, e.g. `asx-history-ui/`.
+  2. Inside, create:
 
-\## 1. Project setup
+     - `src/` (application code)
+     - `tests/` (test suite)
+     - `pyproject.toml` (managed by `uv`)
+     - `README.md`
+     - `PLAN.md` (this file)
 
+### 1.2 Initialize Python environment with `uv`
 
+- **Goal:** Use `uv` for all Python tooling.
+- **Steps:**
 
-\### 1.1 Create repo and base structure
+  1. Create a virtual environment:
 
+     ```bash
+     uv venv
+     ```
 
+  2. Activate it (shell-dependent).
+  3. Add core dependencies (web + tests + plotting):
 
-\- \*\*Goal:\*\* Have a clean, minimal project skeleton ready for TDD.
+     ```bash
+     uv pip install fastapi uvicorn[standard] jinja2 httpx pydantic plotly
+     uv pip install pytest pytest-asyncio httpx[http2]
+     ```
 
-\- \*\*Steps:\*\*
+  4. (Optional) Add `ruff` / `black` later for lint/format.
 
-&#x20; 1. Create project directory, e.g. `asx-history-ui/`.
+- **Outcome:** Reproducible environment using `uv pip` and `uv run`.
 
-&#x20; 2. Inside, create:
+---
 
-&#x20;    - `src/` (application code)
+## 2. High-level architecture
 
-&#x20;    - `tests/` (test suite)
+- **Backend framework:** FastAPI (Python-based, async, modern).
+- **Rendering:** Server-side HTML via Jinja2 templates.
+- **Charts:** Plotly (Python) rendered to HTML/JS and embedded in templates.
+- **HTTP client:** `httpx` to call the existing API at `http://192.168.0.50:30181`.
+- **Structure:**
 
-&#x20;    - `pyproject.toml` (managed by `uv`)
+  - `src/app/main.py` — FastAPI app entrypoint.
+  - `src/app/config.py` — configuration (base API URL, etc.).
+  - `src/app/models.py` — Pydantic models for `health` and `history` responses.
+  - `src/app/client.py` — API client wrapper around `httpx`.
+  - `src/app/views.py` — route handlers.
+  - `src/app/templates/` — Jinja2 templates.
+  - `src/app/charts.py` — chart-building helpers using Plotly.
 
-&#x20;    - `README.md`
+---
 
-&#x20;    - `PLAN.md` (this file)
+## 3. Global testing setup (before any feature)
 
+### 3.1 Add basic test configuration
 
+- **Goal:** Ensure test runner works before writing feature tests.
+- **Tests to write (failing first):**
 
-\### 1.2 Initialize Python environment with `uv`
+  - `tests/test_smoke.py`:
+    - `test_pytest_runs()` — trivial assertion `assert True` (should pass).
+    - `test_app_imports()` — `from app.main import app` and assert it's a FastAPI instance (will fail until `app` exists).
 
+- **Implementation steps (after tests fail):**
 
+  1. Create `src/app/__init__.py`.
+  2. Create `src/app/main.py` with:
 
-\- \*\*Goal:\*\* Use `uv` for all Python tooling.
+     ```python
+     from fastapi import FastAPI
 
-\- \*\*Steps:\*\*
+     app = FastAPI(title="ASX History UI")
+     ```
 
-&#x20; 1. Create a virtual environment:
+  3. Run tests:
 
+     ```bash
+     uv run pytest
+     ```
 
+- **Outcome:** Basic FastAPI app object exists and tests pass.
 
-&#x20;    ```bash
+---
 
-&#x20;    uv venv
+## 4. Configuration and domain models
 
-&#x20;    ```
+### 4.1 Config for base API URL
 
+- **Tests to write (failing first):**
 
+  - `tests/test_config.py`:
+    - `test_default_base_url()` — import `settings` and assert `settings.base_api_url == "http://192.168.0.50:30181"`.
 
-&#x20; 2. Activate it (shell-dependent).
+- **Implementation:**
 
-&#x20; 3. Add core dependencies (web + tests + plotting):
+  1. Create `src/app/config.py`:
 
+     ```python
+     from pydantic import BaseSettings
 
+     class Settings(BaseSettings):
+         base_api_url: str = "http://192.168.0.50:30181"
 
-&#x20;    ```bash
+     settings = Settings()
+     ```
 
-&#x20;    uv pip install fastapi uvicorn\[standard] jinja2 httpx pydantic plotly
+  2. Run tests with `uv run pytest`.
 
-&#x20;    uv pip install pytest pytest-asyncio httpx\[http2]
+### 4.2 Pydantic models for `/health` and `/company/<id>/history`
 
-&#x20;    ```
+- **Assumption:**
 
+  - `/health` returns a list or structure containing ASX codes (e.g. `["IAG", "CBA", ...]` or objects with a `code` field).
+  - `/company/<id>/history` returns a list of records with fields like `date`, `priceClose`, `priceDayHigh`, `priceDayLow`, `volume`, etc.
 
+- **Tests to write (failing first):**
 
-&#x20; 4. (Optional) Add `ruff` / `black` later for lint/format.
+  - `tests/test_models.py`:
+    - `test_company_code_model_parses_health_item()` — given a sample `/health` payload, Pydantic model extracts `code`.
+    - `test_history_item_model_parses_prices()` — given sample history JSON, model exposes `priceClose`, `priceDayHigh`, etc. as floats and `date` as a date/datetime.
 
+- **Implementation:**
 
+  1. Create `src/app/models.py` with Pydantic models, e.g.:
 
-\- \*\*Outcome:\*\* Reproducible environment using `uv pip` and `uv run`.
+     ```python
+     from datetime import date
+     from pydantic import BaseModel
 
+     class Company(BaseModel):
+         code: str
 
+     class HistoryItem(BaseModel):
+         date: date
+         priceClose: float
+         priceDayHigh: float
+         priceDayLow: float
+         volume: int | None = None
+     ```
 
-\---
+  2. Adjust models to match actual API shape once confirmed.
+  3. Re-run tests.
 
+---
 
+## 5. API client wrapper
 
-\## 2. High-level architecture
+### 5.1 Client for `/health` and `/company/<id>/history`
 
+- **Goal:** Encapsulate HTTP calls and parsing.
+- **Tests to write (failing first):**
 
+  - `tests/test_client.py`:
+    - Use `pytest` + `pytest-asyncio`.
+    - Mock `httpx.AsyncClient` (or use `httpx.MockTransport`) to simulate:
+      - `/health` returning a known payload.
+      - `/company/IAG/history` returning known history data.
+    - Tests:
+      - `test_get_companies_returns_company_models()`
+      - `test_get_company_history_returns_history_items()`
 
-\- \*\*Backend framework:\*\* FastAPI (Python-based, async, modern).
+- **Implementation:**
 
-\- \*\*Rendering:\*\* Server-side HTML via Jinja2 templates.
+  1. Create `src/app/client.py`:
 
-\- \*\*Charts:\*\* Plotly (Python) rendered to HTML/JS and embedded in templates.
+     ```python
+     import httpx
+     from .config import settings
+     from .models import Company, HistoryItem
 
-\- \*\*HTTP client:\*\* `httpx` to call the existing API at `http://192.168.0.50:30181`.
+     class ApiClient:
+         def __init__(self, base_url: str | None = None):
+             self.base_url = base_url or settings.base_api_url
 
-\- \*\*Structure:\*\*
+         async def get_companies(self) -> list[Company]:
+             async with httpx.AsyncClient(base_url=self.base_url) as client:
+                 resp = await client.get("/health")
+                 resp.raise_for_status()
+                 data = resp.json()
+                 # adapt to actual shape
+                 return [Company(code=item["code"]) for item in data]
 
+         async def get_company_history(self, code: str) -> list[HistoryItem]:
+             async with httpx.AsyncClient(base_url=self.base_url) as client:
+                 resp = await client.get(f"/company/{code}/history")
+                 resp.raise_for_status()
+                 data = resp.json()
+                 return [HistoryItem(**item) for item in data]
+     ```
 
+  2. Re-run tests and refine parsing as needed.
 
-&#x20; - `src/app/main.py` — FastAPI app entrypoint.
+---
 
-&#x20; - `src/app/config.py` — configuration (base API URL, etc.).
+## 6. Web app skeleton and home page
 
-&#x20; - `src/app/models.py` — Pydantic models for `health` and `history` responses.
+### 6.1 Root route and template engine
 
-&#x20; - `src/app/client.py` — API client wrapper around `httpx`.
+- **Goal:** Have a basic HTML page served at `/`.
+- **Tests to write (failing first):**
 
-&#x20; - `src/app/views.py` — route handlers.
+  - `tests/test_main_routes.py`:
+    - Use `httpx.AsyncClient` with `from fastapi.testclient import TestClient` or `httpx.AsyncClient(app=app, base_url="http://test")`.
+    - `test_root_returns_200_and_html()` — GET `/` returns status 200 and `text/html` content type.
 
-&#x20; - `src/app/templates/` — Jinja2 templates.
+- **Implementation:**
 
-&#x20; - `src/app/charts.py` — chart-building helpers using Plotly.
+  1. Add Jinja2 templates directory: `src/app/templates/`.
+  2. In `src/app/main.py`:
+     - Configure `Jinja2Templates`.
+     - Add root route that renders `index.html`.
+  3. Create `src/app/templates/base.html` and `index.html` with minimal HTML.
+  4. Run tests with `uv run pytest`.
 
+### 6.2 Display list of companies on home page
 
+- **Goal:** Show available ASX codes from `/health` as links.
+- **Tests to write (failing first):**
 
-\---
+  - In `tests/test_main_routes.py`:
+    - Mock `ApiClient.get_companies`.
+    - `test_home_lists_companies()` — response HTML contains each mocked company code and links to `/company/<code>`.
 
+- **Implementation:**
 
+  1. Inject `ApiClient` into routes (e.g. via dependency injection).
+  2. In `views` or directly in `main.py`, implement `/` route:
+     - Call `ApiClient.get_companies()`.
+     - Render `index.html` with `companies` context.
+  3. Update `index.html` to loop over `companies` and render links.
 
-\## 3. Global testing setup (before any feature)
+- **Outcome:** Home page lists ASX codes with navigation.
 
+---
 
+## 7. Company history page with visualization
 
-\### 3.1 Add basic test configuration
+### 7.1 Basic history table for a company
 
+- **Goal:** `/company/{code}` page showing tabular history.
+- **Tests to write (failing first):**
 
+  - In `tests/test_company_history_page.py`:
+    - Mock `ApiClient.get_company_history`.
+    - `test_company_history_page_renders_table()`:
+      - GET `/company/IAG`.
+      - Assert status 200.
+      - Assert HTML contains table headers: `Date`, `Close`, `High`, `Low`, etc.
+      - Assert at least one row with expected values.
 
-\- \*\*Goal:\*\* Ensure test runner works before writing feature tests.
+- **Implementation:**
 
-\- \*\*Tests to write (failing first):\*\*
+  1. Add route `/company/{code}` in `main.py` or `views.py`.
+  2. Use `ApiClient.get_company_history(code)` to fetch data.
+  3. Create `templates/company_history.html`:
+     - Extend `base.html`.
+     - Render a table with rows for each `HistoryItem`.
 
-&#x20; - `tests/test\_smoke.py`:
+### 7.2 PriceClose line chart
 
-&#x20;   - `test\_pytest\_runs()` — trivial assertion `assert True` (should pass).
+- **Goal:** Visualize `priceClose` over time.
+- **Tests to write (failing first):**
 
-&#x20;   - `test\_app\_imports()` — `from app.main import app` and assert it’s a FastAPI instance (will fail until `app` exists).
+  - In `tests/test_charts.py`:
+    - `test_price_close_chart_generates_plotly_figure()`:
+      - Given a list of `HistoryItem`, `build_price_close_chart(history)` returns a Plotly `Figure` with:
+        - x-axis = dates
+        - y-axis = `priceClose`
+    - In `tests/test_company_history_page.py`:
+      - `test_company_history_page_contains_price_close_chart_div()`:
+        - Response HTML contains a `<div>` or `<script>` marker for the chart (e.g. `id="price-close-chart"`).
 
+- **Implementation:**
 
+  1. Create `src/app/charts.py`:
 
-\- \*\*Implementation steps (after tests fail):\*\*
+     ```python
+     import plotly.graph_objects as go
+     from .models import HistoryItem
 
-&#x20; 1. Create `src/app/\_\_init\_\_.py`.
+     def build_price_close_chart(history: list[HistoryItem]):
+         fig = go.Figure()
+         fig.add_trace(
+             go.Scatter(
+                 x=[item.date for item in history],
+                 y=[item.priceClose for item in history],
+                 mode="lines",
+                 name="Close"
+             )
+         )
+         fig.update_layout(
+             title="Closing Price",
+             xaxis_title="Date",
+             yaxis_title="Price"
+         )
+         return fig
+     ```
 
-&#x20; 2. Create `src/app/main.py` with:
+  2. In the `/company/{code}` route:
+     - Call `build_price_close_chart(history)`.
+     - Convert to HTML:
 
+       ```python
+       from plotly.io import to_html
+       chart_html = to_html(fig, include_plotlyjs="cdn", full_html=False)
+       ```
 
+     - Pass `chart_html` into template context.
 
-&#x20;    ```python
+  3. In `company_history.html`, render `{{ chart_html | safe }}` inside a container with `id="price-close-chart"`.
 
-&#x20;    from fastapi import FastAPI
+- **Outcome:** Interactive line chart for `priceClose` appears on the company page.
 
+### 7.3 Additional charts: priceDayHigh, priceDayLow, volume
 
+- **Goal:** Visualize more fields (e.g. high/low as band, volume as bar chart).
+- **Tests to write (failing first):**
 
-&#x20;    app = FastAPI(title="ASX History UI")
+  - In `tests/test_charts.py`:
+    - `test_high_low_chart_uses_high_and_low_values()`.
+    - `test_volume_chart_uses_volume_values()`.
+  - In `tests/test_company_history_page.py`:
+    - `test_company_history_page_contains_high_low_chart_div()`.
+    - `test_company_history_page_contains_volume_chart_div()`.
 
-&#x20;    ```
+- **Implementation:**
 
+  1. Extend `charts.py` with:
 
+     - `build_high_low_chart(history: list[HistoryItem])`
+     - `build_volume_chart(history: list[HistoryItem])`
 
-&#x20; 3. Run tests:
+  2. In `/company/{code}` route:
+     - Build all charts and pass HTML snippets to template.
+  3. Update `company_history.html` to render multiple chart sections.
 
+- **Outcome:** Page shows multiple interactive charts for key metrics.
 
+---
 
-&#x20;    ```bash
+## 8. UX and interaction improvements
 
-&#x20;    uv run pytest
+### 8.1 Company selection from dropdown on home page
 
-&#x20;    ```
+- **Goal:** Allow user to select a company from a dropdown and navigate.
+- **Tests to write (failing first):**
 
+  - `tests/test_home_company_selection.py`:
+    - `test_home_contains_company_select_form()` — HTML contains `<select>` with company codes.
+    - (Optional) Use integration-style test to simulate form submission and redirect to `/company/{code}`.
 
+- **Implementation:**
 
-\- \*\*Outcome:\*\* Basic FastAPI app object exists and tests pass.
+  1. Update `index.html` to include a `<form>` with `<select name="code">`.
+  2. Add route `/select-company` (POST) that redirects to `/company/{code}`.
+  3. Ensure tests pass.
 
+### 8.2 Basic styling
 
+- **Goal:** Make UI readable and modern-ish without heavy JS frameworks.
+- **Tests to write (failing first):**
 
-\---
+  - Very light tests, e.g.:
+    - `test_base_template_includes_main_stylesheet_link()`.
 
+- **Implementation:**
 
+  1. Add `static/` directory with a simple CSS file.
+  2. Configure FastAPI `StaticFiles`.
+  3. Link stylesheet in `base.html`.
 
-\## 4. Configuration and domain models
+---
 
+## 9. Error handling and edge cases
 
+### 9.1 Handle unknown company code
 
-\### 4.1 Config for base API URL
+- **Tests to write (failing first):**
 
+  - `tests/test_error_handling.py`:
+    - Mock `ApiClient.get_company_history` to raise `httpx.HTTPStatusError` for unknown code.
+    - `test_unknown_company_shows_error_message()` — HTML contains a user-friendly error message.
 
+- **Implementation:**
 
-\- \*\*Tests to write (failing first):\*\*
+  1. Wrap history fetch in try/except.
+  2. On error, render template with error banner instead of crashing.
 
-&#x20; - `tests/test\_config.py`:
+### 9.2 Handle empty history
 
-&#x20;   - `test\_default\_base\_url()` — import `settings` and assert `settings.base\_api\_url == "http://192.168.0.50:30181"`.
+- **Tests to write (failing first):**
 
+  - `test_empty_history_shows_no_data_message()` — when history list is empty, page shows "No history available" and no charts.
 
+- **Implementation:**
 
-\- \*\*Implementation:\*\*
+  1. In route, if `history` is empty:
+     - Skip chart generation.
+     - Pass a flag to template to show "no data" message.
 
-&#x20; 1. Create `src/app/config.py`:
+---
 
+## 10. Running the app and tests
 
+### 10.1 Test commands
 
-&#x20;    ```python
+- **Run full test suite:**
 
-&#x20;    from pydantic import BaseSettings
+  ```bash
+  uv run pytest
+  ```
 
+- **Run individual test file:**
 
+  ```bash
+  uv run pytest tests/test_smoke.py
+  ```
 
-&#x20;    class Settings(BaseSettings):
+- **Run with verbose output:**
 
-&#x20;        base\_api\_url: str = "http://192.168.0.50:30181"
+  ```bash
+  uv run pytest -v
+  ```
 
+- **Run with coverage:**
 
+  ```bash
+  uv run pytest --cov=src --cov-report=html
+  ```
 
-&#x20;    settings = Settings()
+- **Run tests with coverage report:**
 
-&#x20;    ```
+  ```bash
+  uv run pytest --cov=src --cov-report=term-missing
+  ```
 
+---
 
+## 11. Development workflow
 
-&#x20; 2. Run tests with `uv run pytest`.
+### 11.1 Adding new features
 
+1. Write failing tests first (TDD).
+2. Make tests pass.
+3. Refactor if needed.
+4. Add documentation.
 
+### 11.2 Running the application
 
-\### 4.2 Pydantic models for `/health` and `/company/<id>/history`
+```bash
+uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
+Access at `http://localhost:8000`
 
+---
 
-\- \*\*Assumption:\*\*  
+## 12. Project structure
 
-&#x20; - `/health` returns a list or structure containing ASX codes (e.g. `\["IAG", "CBA", ...]` or objects with a `code` field).
+```
+asx-history-ui/
+├── src/
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   ├── models.py
+│   │   ├── client.py
+│   │   ├── views.py
+│   │   ├── charts.py
+│   │   └── templates/
+│   │       ├── base.html
+│   │       ├── index.html
+│   │       └── company_history.html
+│   └── __init__.py
+├── tests/
+│   ├── __init__.py
+│   ├── test_smoke.py
+│   ├── test_config.py
+│   ├── test_models.py
+│   ├── test_client.py
+│   ├── test_main_routes.py
+│   ├── test_company_history_page.py
+│   ├── test_charts.py
+│   ├── test_home_company_selection.py
+│   ├── test_error_handling.py
+│   └── conftest.py
+├── pyproject.toml
+├── README.md
+└── PLAN.md
+```
 
-&#x20; - `/company/<id>/history` returns a list of records with fields like `date`, `priceClose`, `priceDayHigh`, `priceDayLow`, `volume`, etc.
+---
 
+## 13. Notes
 
-
-\- \*\*Tests to write (failing first):\*\*
-
-&#x20; - `tests/test\_models.py`:
-
-&#x20;   - `test\_company\_code\_model\_parses\_health\_item()` — given a sample `/health` payload, Pydantic model extracts `code`.
-
-&#x20;   - `test\_history\_item\_model\_parses\_prices()` — given sample history JSON, model exposes `priceClose`, `priceDayHigh`, etc. as floats and `date` as a date/datetime.
-
-
-
-\- \*\*Implementation:\*\*
-
-&#x20; 1. Create `src/app/models.py` with Pydantic models, e.g.:
-
-
-
-&#x20;    ```python
-
-&#x20;    from datetime import date
-
-&#x20;    from pydantic import BaseModel
-
-
-
-&#x20;    class Company(BaseModel):
-
-&#x20;        code: str
-
-
-
-&#x20;    class HistoryItem(BaseModel):
-
-&#x20;        date: date
-
-&#x20;        priceClose: float
-
-&#x20;        priceDayHigh: float
-
-&#x20;        priceDayLow: float
-
-&#x20;        volume: int | None = None
-
-&#x20;    ```
-
-
-
-&#x20; 2. Adjust models to match actual API shape once confirmed.
-
-&#x20; 3. Re-run tests.
-
-
-
-\---
-
-
-
-\## 5. API client wrapper
-
-
-
-\### 5.1 Client for `/health` and `/company/<id>/history`
-
-
-
-\- \*\*Goal:\*\* Encapsulate HTTP calls and parsing.
-
-
-
-\- \*\*Tests to write (failing first):\*\*
-
-&#x20; - `tests/test\_client.py`:
-
-&#x20;   - Use `pytest` + `pytest-asyncio`.
-
-&#x20;   - Mock `httpx.AsyncClient` (or use `httpx.MockTransport`) to simulate:
-
-&#x20;     - `/health` returning a known payload.
-
-&#x20;     - `/company/IAG/history` returning known history data.
-
-&#x20;   - Tests:
-
-&#x20;     - `test\_get\_companies\_returns\_company\_models()`
-
-&#x20;     - `test\_get\_company\_history\_returns\_history\_items()`
-
-
-
-\- \*\*Implementation:\*\*
-
-&#x20; 1. Create `src/app/client.py`:
-
-
-
-&#x20;    ```python
-
-&#x20;    import httpx
-
-&#x20;    from .config import settings
-
-&#x20;    from .models import Company, HistoryItem
-
-
-
-&#x20;    class ApiClient:
-
-&#x20;        def \_\_init\_\_(self, base\_url: str | None = None):
-
-&#x20;            self.base\_url = base\_url or settings.base\_api\_url
-
-
-
-&#x20;        async def get\_companies(self) -> list\[Company]:
-
-&#x20;            async with httpx.AsyncClient(base\_url=self.base\_url) as client:
-
-&#x20;                resp = await client.get("/health")
-
-&#x20;                resp.raise\_for\_status()
-
-&#x20;                data = resp.json()
-
-&#x20;                # adapt to actual shape
-
-&#x20;                return \[Company(code=item\["code"]) for item in data]
-
-
-
-&#x20;        async def get\_company\_history(self, code: str) -> list\[HistoryItem]:
-
-&#x20;            async with httpx.AsyncClient(base\_url=self.base\_url) as client:
-
-&#x20;                resp = await client.get(f"/company/{code}/history")
-
-&#x20;                resp.raise\_for\_status()
-
-&#x20;                data = resp.json()
-
-&#x20;                return \[HistoryItem(\*\*item) for item in data]
-
-&#x20;    ```
-
-
-
-&#x20; 2. Re-run tests and refine parsing as needed.
-
-
-
-\---
-
-
-
-\## 6. Web app skeleton and home page
-
-
-
-\### 6.1 Root route and template engine
-
-
-
-\- \*\*Goal:\*\* Have a basic HTML page served at `/`.
-
-
-
-\- \*\*Tests to write (failing first):\*\*
-
-&#x20; - `tests/test\_main\_routes.py`:
-
-&#x20;   - Use `httpx.AsyncClient` with `from fastapi.testclient import TestClient` or `httpx.AsyncClient(app=app, base\_url="http://test")`.
-
-&#x20;   - `test\_root\_returns\_200\_and\_html()` — GET `/` returns status 200 and `text/html` content type.
-
-
-
-\- \*\*Implementation:\*\*
-
-&#x20; 1. Add Jinja2 templates directory: `src/app/templates/`.
-
-&#x20; 2. In `src/app/main.py`:
-
-&#x20;    - Configure `Jinja2Templates`.
-
-&#x20;    - Add root route that renders `index.html`.
-
-&#x20; 3. Create `src/app/templates/base.html` and `index.html` with minimal HTML.
-
-
-
-&#x20; 4. Run tests with `uv run pytest`.
-
-
-
-\### 6.2 Display list of companies on home page
-
-
-
-\- \*\*Goal:\*\* Show available ASX codes from `/health` as links.
-
-
-
-\- \*\*Tests to write (failing first):\*\*
-
-&#x20; - In `tests/test\_main\_routes.py`:
-
-&#x20;   - Mock `ApiClient.get\_companies`.
-
-&#x20;   - `test\_home\_lists\_companies()` — response HTML contains each mocked company code and links to `/company/<code>`.
-
-
-
-\- \*\*Implementation:\*\*
-
-&#x20; 1. Inject `ApiClient` into routes (e.g. via dependency injection).
-
-&#x20; 2. In `views` or directly in `main.py`, implement `/` route:
-
-&#x20;    - Call `ApiClient.get\_companies()`.
-
-&#x20;    - Render `index.html` with `companies` context.
-
-&#x20; 3. Update `index.html` to loop over `companies` and render links.
-
-
-
-\- \*\*Outcome:\*\* Home page lists ASX codes with navigation.
-
-
-
-\---
-
-
-
-\## 7. Company history page with visualization
-
-
-
-\### 7.1 Basic history table for a company
-
-
-
-\- \*\*Goal:\*\* `/company/{code}` page showing tabular history.
-
-
-
-\- \*\*Tests to write (failing first):\*\*
-
-&#x20; - In `tests/test\_company\_history\_page.py`:
-
-&#x20;   - Mock `ApiClient.get\_company\_history`.
-
-&#x20;   - `test\_company\_history\_page\_renders\_table()`:
-
-&#x20;     - GET `/company/IAG`.
-
-&#x20;     - Assert status 200.
-
-&#x20;     - Assert HTML contains table headers: `Date`, `Close`, `High`, `Low`, etc.
-
-&#x20;     - Assert at least one row with expected values.
-
-
-
-\- \*\*Implementation:\*\*
-
-&#x20; 1. Add route `/company/{code}` in `main.py` or `views.py`.
-
-&#x20; 2. Use `ApiClient.get\_company\_history(code)` to fetch data.
-
-&#x20; 3. Create `templates/company\_history.html`:
-
-&#x20;    - Extend `base.html`.
-
-&#x20;    - Render a table with rows for each `HistoryItem`.
-
-
-
-\### 7.2 PriceClose line chart
-
-
-
-\- \*\*Goal:\*\* Visualize `priceClose` over time.
-
-
-
-\- \*\*Tests to write (failing first):\*\*
-
-&#x20; - In `tests/test\_charts.py`:
-
-&#x20;   - `test\_price\_close\_chart\_generates\_plotly\_figure()`:
-
-&#x20;     - Given a list of `HistoryItem`, `build\_price\_close\_chart(history)` returns a Plotly `Figure` with:
-
-&#x20;       - x-axis = dates
-
-&#x20;       - y-axis = `priceClose`
-
-&#x20;   - In `tests/test\_company\_history\_page.py`:
-
-&#x20;     - `test\_company\_history\_page\_contains\_price\_close\_chart\_div()`:
-
-&#x20;       - Response HTML contains a `<div>` or `<script>` marker for the chart (e.g. `id="price-close-chart"`).
-
-
-
-\- \*\*Implementation:\*\*
-
-&#x20; 1. Create `src/app/charts.py`:
-
-
-
-&#x20;    ```python
-
-&#x20;    import plotly.graph\_objects as go
-
-&#x20;    from .models import HistoryItem
-
-
-
-&#x20;    def build\_price\_close\_chart(history: list\[HistoryItem]):
-
-&#x20;        fig = go.Figure()
-
-&#x20;        fig.add\_trace(
-
-&#x20;            go.Scatter(
-
-&#x20;                x=\[item.date for item in history],
-
-&#x20;                y=\[item.priceClose for item in history],
-
-&#x20;                mode="lines",
-
-&#x20;                name="Close"
-
-&#x20;            )
-
-&#x20;        )
-
-&#x20;        fig.update\_layout(
-
-&#x20;            title="Closing Price",
-
-&#x20;            xaxis\_title="Date",
-
-&#x20;            yaxis\_title="Price"
-
-&#x20;        )
-
-&#x20;        return fig
-
-&#x20;    ```
-
-
-
-&#x20; 2. In the `/company/{code}` route:
-
-&#x20;    - Call `build\_price\_close\_chart(history)`.
-
-&#x20;    - Convert to HTML:
-
-
-
-&#x20;      ```python
-
-&#x20;      from plotly.io import to\_html
-
-&#x20;      chart\_html = to\_html(fig, include\_plotlyjs="cdn", full\_html=False)
-
-&#x20;      ```
-
-
-
-&#x20;    - Pass `chart\_html` into template context.
-
-
-
-&#x20; 3. In `company\_history.html`, render `{{ chart\_html | safe }}` inside a container with `id="price-close-chart"`.
-
-
-
-\- \*\*Outcome:\*\* Interactive line chart for `priceClose` appears on the company page.
-
-
-
-\### 7.3 Additional charts: priceDayHigh, priceDayLow, volume
-
-
-
-\- \*\*Goal:\*\* Visualize more fields (e.g. high/low as band, volume as bar chart).
-
-
-
-\- \*\*Tests to write (failing first):\*\*
-
-&#x20; - In `tests/test\_charts.py`:
-
-&#x20;   - `test\_high\_low\_chart\_uses\_high\_and\_low\_values()`.
-
-&#x20;   - `test\_volume\_chart\_uses\_volume\_values()`.
-
-&#x20; - In `tests/test\_company\_history\_page.py`:
-
-&#x20;   - `test\_company\_history\_page\_contains\_high\_low\_chart\_div()`.
-
-&#x20;   - `test\_company\_history\_page\_contains\_volume\_chart\_div()`.
-
-
-
-\- \*\*Implementation:\*\*
-
-&#x20; 1. Extend `charts.py` with:
-
-
-
-&#x20;    - `build\_high\_low\_chart(history: list\[HistoryItem])`
-
-&#x20;    - `build\_volume\_chart(history: list\[HistoryItem])`
-
-
-
-&#x20; 2. In `/company/{code}` route:
-
-&#x20;    - Build all charts and pass HTML snippets to template.
-
-&#x20; 3. Update `company\_history.html` to render multiple chart sections.
-
-
-
-\- \*\*Outcome:\*\* Page shows multiple interactive charts for key metrics.
-
-
-
-\---
-
-
-
-\## 8. UX and interaction improvements
-
-
-
-\### 8.1 Company selection from dropdown on home page
-
-
-
-\- \*\*Goal:\*\* Allow user to select a company from a dropdown and navigate.
-
-
-
-\- \*\*Tests to write (failing first):\*\*
-
-&#x20; - `tests/test\_home\_company\_selection.py`:
-
-&#x20;   - `test\_home\_contains\_company\_select\_form()` — HTML contains `<select>` with company codes.
-
-&#x20;   - (Optional) Use integration-style test to simulate form submission and redirect to `/company/{code}`.
-
-
-
-\- \*\*Implementation:\*\*
-
-&#x20; 1. Update `index.html` to include a `<form>` with `<select name="code">`.
-
-&#x20; 2. Add route `/select-company` (POST) that redirects to `/company/{code}`.
-
-&#x20; 3. Ensure tests pass.
-
-
-
-\### 8.2 Basic styling
-
-
-
-\- \*\*Goal:\*\* Make UI readable and modern-ish without heavy JS frameworks.
-
-
-
-\- \*\*Tests to write (failing first):\*\*
-
-&#x20; - Very light tests, e.g.:
-
-&#x20;   - `test\_base\_template\_includes\_main\_stylesheet\_link()`.
-
-
-
-\- \*\*Implementation:\*\*
-
-&#x20; 1. Add `static/` directory with a simple CSS file.
-
-&#x20; 2. Configure FastAPI `StaticFiles`.
-
-&#x20; 3. Link stylesheet in `base.html`.
-
-
-
-\---
-
-
-
-\## 9. Error handling and edge cases
-
-
-
-\### 9.1 Handle unknown company code
-
-
-
-\- \*\*Tests to write (failing first):\*\*
-
-&#x20; - `tests/test\_error\_handling.py`:
-
-&#x20;   - Mock `ApiClient.get\_company\_history` to raise `httpx.HTTPStatusError` for unknown code.
-
-&#x20;   - `test\_unknown\_company\_shows\_error\_message()` — HTML contains a user-friendly error message.
-
-
-
-\- \*\*Implementation:\*\*
-
-&#x20; 1. Wrap history fetch in try/except.
-
-&#x20; 2. On error, render template with error banner instead of crashing.
-
-
-
-\### 9.2 Handle empty history
-
-
-
-\- \*\*Tests to write (failing first):\*\*
-
-&#x20; - `test\_empty\_history\_shows\_no\_data\_message()` — when history list is empty, page shows “No history available” and no charts.
-
-
-
-\- \*\*Implementation:\*\*
-
-&#x20; 1. In route, if `history` is empty:
-
-&#x20;    - Skip chart generation.
-
-&#x20;    - Pass a flag to template to show “no data” message.
-
-
-
-\---
-
-
-
-\## 10. Running the app and tests
-
-
-
-\### 10.1 Test commands
-
-
-
-\- \*\*Run full test suite:\*\*
-
-
-
-&#x20; ```bash
-
-&#x20; uv run pytest
-
-
-
+- All tests should follow the TDD principle: write failing tests first, then implement.
+- Use `uv run` for all Python commands to ensure the correct environment is used.
+- Keep dependencies minimal and focused on the task.
+- Document any assumptions about the API response format in comments or a separate file.
