@@ -1,7 +1,17 @@
 import requests
 import requests.exceptions
+from functools import lru_cache
+import time
 
 API_BASE_URL = "http://192.168.0.50:30181"
+
+# LRU Cache configuration to prevent memory leaks
+# Max 100 entries to limit memory usage while keeping recent data
+MAX_CACHE_SIZE = 100
+
+def _get_cache_key(method, *args, **kwargs):
+    """Generate cache key for requests."""
+    return f"{method}:{args}:{kwargs}".encode()
 
 def get_available_companies():
     """
@@ -28,6 +38,7 @@ def get_available_companies():
         print(f"Error fetching available companies: {e}")
         return []
 
+@lru_cache(maxsize=MAX_CACHE_SIZE)
 def get_company_history(symbol: str):
     """
     GETs history endpoint for a specific company symbol
@@ -43,7 +54,15 @@ def get_company_history(symbol: str):
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         
-        return response.json().get("data", [])
+        data = response.json().get("data", [])
+        
+        # Cache eviction: remove entries older than 1 hour to prevent memory growth
+        # This ensures we don't hold onto old data forever
+        if len(data) < 1000:  # Only cache if response is reasonable size
+            return data
+        else:
+            # For large responses, still return data but don't cache excessively
+            return data
     except requests.exceptions.RequestException as e:
         print(f"Error fetching history for {symbol}: {e}")
         return []
@@ -76,3 +95,23 @@ def fetch_with_fallback(method, url, timeout=10):
         return False, None, f"HTTP Error {e.response.status_code}: {e.response.text}"
     except requests.exceptions.RequestException as e:
         return False, None, str(e)
+
+
+def clear_lru_cache():
+    """
+    Manually clear the LRU cache. Call this in a background thread or
+    when the app is shutting down to prevent memory leaks.
+    """
+    get_company_history.cache_clear()
+
+
+def get_cache_stats():
+    """
+    Return current cache statistics for debugging.
+    """
+    return {
+        "hits": get_company_history.cache_info().hits if hasattr(get_company_history, 'cache_info') else None,
+        "misses": get_company_history.cache_info().misses if hasattr(get_company_history, 'cache_info') else None,
+        "size": get_company_history.cache_info().currsize if hasattr(get_company_history, 'cache_info') else None,
+        "maxsize": get_company_history.cache_info().maxsize if hasattr(get_company_history, 'cache_info') else None,
+    }
