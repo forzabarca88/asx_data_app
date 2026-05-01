@@ -1,80 +1,107 @@
+import logging
+import sys
+import signal
 import streamlit as st
 import requests
 import pandas as pd
 import plotly.express as px
-from api_client import get_available_companies, get_company_history, get_cache_stats
+from api_client import get_available_companies, get_company_history
+
+# Configure detailed logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger('asx_app')
+
+# Set up signal handlers for Ctrl+C (SIGINT)
+def signal_handler(signum, frame):
+    """Handle Ctrl+C gracefully"""
+    logger.critical("\nReceived SIGINT (Ctrl+C) - Terminating application")
+    sys.exit(0)
+
+# Register signal handlers - wrapped in try-except for Streamlit compatibility
+try:
+    signal.signal(signal.SIGINT, signal_handler)
+    logger.info("Signal handlers registered")
+except ValueError as e:
+    if "signal only works in main thread" in str(e):
+        logger.warning(f"Signal handlers not registered: {e}")
+        logger.info("This is expected in Streamlit environments")
+    else:
+        raise
+
+# Cleanup function - also wrapped in try-except
+def cleanup():
+    try:
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+    except ValueError:
+        pass
+
+import atexit
+try:
+    atexit.register(cleanup)
+except ValueError:
+    pass
 
 # Configuration
 DEFAULT_TOP_N = 10
-MAX_CACHE_SIZE = 100  # Match api_client.py
 
 # API Configuration
 API_BASE_URL = "http://192.168.0.50:30181"
 
-# Optimized caching with smaller TTL and cache stats
-@st.cache_resource(ttl=60, max_entries=5)
+
 def fetch_company_data():
-    """Fetch available companies from API with limited cache size"""
+    """Fetch available companies from API"""
+    logger.info(f"Fetching available companies from {API_BASE_URL}/health")
     try:
         health_url = f"{API_BASE_URL}/health"
         response = requests.get(health_url, timeout=10)
         response.raise_for_status()
         data = response.json()
         companies = list(data.get("data", {}).get("refreshes", {}).keys())
-        
-        # Log cache stats for debugging
-        if hasattr(get_company_history, 'cache_info'):
-            info = get_company_history.cache_info()
-            print(f"API Cache: hits={info.hits}, misses={info.misses}, size={info.currsize}/{info.maxsize}")
-        
+        logger.info(f"Successfully fetched {len(companies)} companies")
         return companies
     except requests.RequestException as e:
+        logger.error(f"API Unavailable: {str(e)}")
         st.error(f"API Unavailable: {str(e)}")
         return []
 
-@st.cache_resource(ttl=60, max_entries=5)
+
 def fetch_history(symbol):
-    """Fetch historical data for a company with optimized caching"""
-    try:
-        history_url = f"{API_BASE_URL}/company/{symbol}/history"
-        response = requests.get(history_url, timeout=10)
-        response.raise_for_status()
-        
-        # Check cache stats periodically
-        if hasattr(get_company_history, 'cache_info'):
-            info = get_company_history.cache_info()
-            if info.currsize > MAX_CACHE_SIZE * 0.9:  # 90% threshold
-                print(f"Cache near capacity ({info.currsize}/{info.maxsize}), evicting...")
-                get_company_history.cache_clear()
-        
-        return response.json().get("data", [])
-    except requests.RequestException as e:
-        st.error(f"Failed to fetch history for {symbol}: {str(e)}")
-        return []
+    """Fetch historical data for a company"""
+    logger.info(f"Fetching history for symbol: {symbol}")
+    data = get_company_history(symbol)
+    logger.info(f"Fetched {len(data)} records for {symbol}")
+    return data
+
 
 def process_dataframe(raw_data):
     """Convert raw API data to clean DataFrame"""
     if not raw_data:
+        logger.info("No raw data to process")
         return pd.DataFrame()
     
     df = pd.DataFrame(raw_data)
+    logger.info(f"Processed DataFrame columns: {list(df.columns)}")
     
-    # Convert fetched_at to datetime
     if 'fetched_at' in df.columns:
         df['fetched_at'] = pd.to_datetime(df['fetched_at'], errors='coerce')
     
-    # Sort chronologically
     if 'fetched_at' in df.columns:
         df = df.sort_values('fetched_at', ascending=False).reset_index(drop=True)
+        logger.info(f"Sorted by fetched_at (descending), reset index")
     
-    # Identify numerical columns for plotting
     numeric_cols = [
         'priceAsk', 'priceBid', 'priceClose', 'priceDayHigh', 'priceDayLow',
         'volumeAverage', 'cashFlow'
     ]
     valid_numeric = [col for col in numeric_cols if col in df.columns and df[col].dtype in ['float', 'int']]
+    logger.info(f"Valid numeric columns: {valid_numeric}")
     
     return df, valid_numeric
+
 
 def calculate_median_performance(companies, selected_param='priceClose'):
     """
@@ -87,69 +114,64 @@ def calculate_median_performance(companies, selected_param='priceClose'):
     Returns:
         DataFrame with company, current value, median value, and percentage change
     """
+    logger.info(f"Calculating median performance for {len(companies)} companies")
     results = []
     
-    # Process in batches to limit memory usage
-    batch_size = min(5, len(companies))  # Process max 5 companies at a time
+    batch_size = min(5, len(companies))
+    logger.info(f"Processing in batches of {batch_size}")
     
     for i in range(0, len(companies), batch_size):
         batch = companies[i:i + batch_size]
+        logger.info(f"Processing batch: {batch}")
         
         for symbol in batch:
-            try:
-                history = fetch_history(symbol)
-                if not history:
-                    continue
-                
-                df = pd.DataFrame(history)
-                if 'fetched_at' not in df.columns or 'priceClose' not in df.columns:
-                    continue
-                
-                # Convert datetime and sort
-                df['fetched_at'] = pd.to_datetime(df['fetched_at'], errors='coerce')
-                df = df.sort_values('fetched_at', ascending=False).reset_index(drop=True)
-                
-                if df.empty:
-                    continue
-                
-                # Get latest and median values
-                latest = df.iloc[0]
-                current_val = latest.get(selected_param, 0)
-                
-                # Calculate median of all historical values
-                if len(df) > 0 and selected_param in df.columns:
-                    median_val = df[selected_param].median()
-                else:
-                    median_val = current_val
-                
-                # Calculate percentage change
-                if median_val != 0:
-                    pct_change = ((current_val - median_val) / abs(median_val)) * 100
-                else:
-                    pct_change = 0
-                
-                results.append({
-                    'Symbol': symbol,
-                    'Current Price': current_val,
-                    'Median Price': median_val,
-                    'Change %': pct_change
-                })
-            except Exception as e:
+            history = fetch_history(symbol)
+            if not history:
+                logger.debug(f"No history for {symbol}")
                 continue
-        
-        # Evict cache after each batch to prevent memory buildup
-        if hasattr(get_company_history, 'cache_info'):
-            info = get_company_history.cache_info()
-            if info.currsize > MAX_CACHE_SIZE * 0.8:
-                get_company_history.cache_clear()
+            
+            df = pd.DataFrame(history)
+            if 'fetched_at' not in df.columns or 'priceClose' not in df.columns:
+                logger.debug(f"Missing columns for {symbol}")
+                continue
+            
+            df['fetched_at'] = pd.to_datetime(df['fetched_at'], errors='coerce')
+            df = df.sort_values('fetched_at', ascending=False).reset_index(drop=True)
+            
+            if df.empty:
+                logger.debug(f"Empty DataFrame for {symbol}")
+                continue
+            
+            latest = df.iloc[0]
+            current_val = latest.get(selected_param, 0)
+            
+            if len(df) > 0 and selected_param in df.columns:
+                median_val = df[selected_param].median()
+            else:
+                median_val = current_val
+            
+            if median_val != 0:
+                pct_change = ((current_val - median_val) / abs(median_val)) * 100
+            else:
+                pct_change = 0
+            
+            results.append({
+                'Symbol': symbol,
+                'Current Price': current_val,
+                'Median Price': median_val,
+                'Change %': pct_change
+            })
     
     if not results:
+        logger.warning("No results generated")
         return pd.DataFrame()
     
     df_results = pd.DataFrame(results)
     df_results = df_results.sort_values('Change %', ascending=False)
+    logger.info(f"Generated performance DataFrame with {len(df_results)} rows")
     
     return df_results
+
 
 # Page configuration
 st.set_page_config(
@@ -160,13 +182,16 @@ st.set_page_config(
 
 # Sidebar controls
 with st.sidebar:
+    logger.info("Initializing sidebar controls")
     st.header("📊 Select Company")
     companies = fetch_company_data()
     
     if not companies:
+        logger.error("Unable to fetch companies from API")
         st.error("Unable to connect to API. Please check the network connection.")
         st.stop()
     
+    logger.info(f"User selecting company from {len(companies)} available")
     selected_company = st.selectbox("Company", companies)
     
     st.divider()
@@ -174,28 +199,21 @@ with st.sidebar:
     st.header("📉 Select Parameter")
     available_params = ['priceClose', 'priceAsk', 'priceBid', 'volumeAverage', 'cashFlow', 'priceDayHigh', 'priceDayLow']
     selected_param = st.selectbox("Parameter", available_params)
-    
-    # Cache statistics
-    st.divider()
-    st.caption("🔧 Cache Stats")
-    cache_info = get_cache_stats()
-    if cache_info:
-        st.metric("Cache Hits", f"{cache_info.get('hits', 0):,}")
-        st.metric("Cache Misses", f"{cache_info.get('misses', 0):,}")
-        st.metric("Active Entries", f"{cache_info.get('size', 0)}/{cache_info.get('maxsize', '∞')}")
 
 # Main content area
+logger.info(f"Loading main content for {selected_company}")
 col1, col2 = st.columns([3, 1])
 
 with col1:
-    # Fetch and process data
+    logger.info(f"Fetching history for {selected_company}")
     history_data = fetch_history(selected_company)
     df, numeric_cols = process_dataframe(history_data)
     
     if df.empty:
+        logger.warning(f"No historical data for {selected_company}")
         st.warning(f"No historical data available for {selected_company}")
     else:
-        # Display metrics
+        logger.info(f"Processing {len(df)} records")
         latest = df.iloc[0]
         prev = df.iloc[1] if len(df) > 1 else latest
         
@@ -205,15 +223,13 @@ with col1:
         st.metric(
             label=f"Latest {selected_param}",
             value=f"{latest.get(selected_param, 0):,.2f}" if selected_param in latest else "N/A",
-            delta=f"{price_change:+.2f} ({change_pct:+.2f}%)"
-        )
+            delta=f"{price_change:+.2f} ({change_pct:+.2f}%)")
         
-        # Create visualization
         if selected_param in numeric_cols and len(df) > 0:
-            # Filter out nulls
             plot_data = df.dropna(subset=[selected_param, 'fetched_at'])
             
             if not plot_data.empty:
+                logger.info(f"Rendering line chart for {selected_param}")
                 fig = px.line(
                     plot_data,
                     x='fetched_at',
@@ -224,36 +240,41 @@ with col1:
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
+                logger.warning(f"No valid data points for {selected_param}")
                 st.warning(f"No valid data points for {selected_param}")
 
 with col2:
-    # Display recent data as table
     if not df.empty:
+        logger.info("Displaying recent data")
         st.subheader("Recent Data")
         display_cols = ['fetched_at', 'priceClose', 'volumeAverage']
         st.dataframe(df[display_cols].head(10), use_container_width=True)
+    else:
+        logger.debug("No data to display in recent data section")
 
 # Top N Companies by Median Performance
 st.divider()
 st.subheader(f"📊 Top {DEFAULT_TOP_N} Companies by Median Change")
 
-# Fetch data for all companies
+logger.info(f"Fetching all companies for performance analysis")
 all_companies = fetch_company_data()
+
 if all_companies:
+    logger.info(f"Calculating performance for {len(all_companies)} companies")
     performance_df = calculate_median_performance(all_companies)
     
     if not performance_df.empty:
-        # Display top gainers and losers
         top_n = min(DEFAULT_TOP_N, len(performance_df))
+        logger.info(f"Displaying top {top_n} companies")
         
         col3, col4 = st.columns(2)
         
         with col3:
             st.subheader("📈 Top Gainers")
-            gainers = performance_df.head(min(5, top_n))
+            gainers = performance_df.sort_values('Change %', ascending=False).head(min(5, top_n))
             
             if not gainers.empty:
-                # Create a bar chart for top gainers
+                logger.info("Rendering gainers chart")
                 fig_gainers = px.bar(
                     gainers,
                     x='Change %',
@@ -268,9 +289,10 @@ if all_companies:
         
         with col4:
             st.subheader("📉 Top Losers")
-            losers = performance_df.tail(min(5, top_n)).sort_values('Change %')
+            losers = performance_df.sort_values('Change %', ascending=False).head(min(5, top_n))
             
             if not losers.empty:
+                logger.info("Rendering losers chart")
                 fig_losers = px.bar(
                     losers,
                     x='Change %',
@@ -283,22 +305,15 @@ if all_companies:
             else:
                 st.info("No losers available")
         
-        # Display detailed table
         st.subheader(f"Full Ranking ({len(performance_df)} companies)")
-        # Select relevant columns for display
         display_cols_perf = ['Symbol', 'Current Price', 'Median Price', 'Change %']
         st.dataframe(performance_df[display_cols_perf].head(top_n), use_container_width=True)
+    else:
+        logger.warning("No performance data calculated")
+else:
+    logger.error("No companies available for performance analysis")
+    st.error("Unable to load performance data")
 
 # Footer
 st.divider()
 st.caption("ASX Data Visualisation App | Powered by Streamlit")
-
-# Cleanup on shutdown
-if 'cleanup_done' not in st.session_state:
-    try:
-        # Clear LRU cache to release memory
-        if hasattr(get_company_history, 'cache_clear'):
-            get_company_history.cache_clear()
-        st.session_state.cleanup_done = True
-    except Exception as e:
-        pass
