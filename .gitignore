@@ -1,4 +1,4 @@
-# --- Python bytecode ---
+﻿# --- Python bytecode ---
 __pycache__/
 *.py[cod]
 *.pyo
@@ -67,5 +67,4 @@ instance/
 *.sqlite3
 
 # --- OS noise ---
-.DS_Store
-Thumbs.db
+data/

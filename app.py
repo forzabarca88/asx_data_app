@@ -2,10 +2,9 @@ import logging
 import sys
 import signal
 import streamlit as st
-import requests
 import pandas as pd
 import plotly.express as px
-from api_client import get_available_companies, get_company_history
+from csv_client import download_csv_once, get_available_companies, get_company_history
 
 # Configure detailed logging
 logging.basicConfig(
@@ -48,29 +47,27 @@ except ValueError:
 # Configuration
 DEFAULT_TOP_N = 10
 
-# API Configuration
-API_BASE_URL = "http://192.168.0.50:30181"
+# CSV Data Cache (loaded at startup)
+CSV_DATA_CACHE = None
+
+def get_csv_cache():
+    """Get or initialize the CSV data cache with 3-day filter."""
+    global CSV_DATA_CACHE
+    if CSV_DATA_CACHE is None:
+        from datetime import datetime, timedelta
+        start_date = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
+        CSV_DATA_CACHE = download_csv_once(start_date=start_date)
+    return CSV_DATA_CACHE
 
 
 def fetch_company_data():
-    """Fetch available companies from API"""
-    logger.info(f"Fetching available companies from {API_BASE_URL}/health")
-    try:
-        health_url = f"{API_BASE_URL}/health"
-        response = requests.get(health_url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        companies = list(data.get("data", {}).get("refreshes", {}).keys())
-        logger.info(f"Successfully fetched {len(companies)} companies")
-        return companies
-    except requests.RequestException as e:
-        logger.error(f"API Unavailable: {str(e)}")
-        st.error(f"API Unavailable: {str(e)}")
-        return []
+    """Fetch available companies from cached CSV data."""
+    logger.info("Loading companies from cached CSV")
+    return get_available_companies()
 
 
 def fetch_history(symbol):
-    """Fetch historical data for a company"""
+    """Fetch historical data for a company from cached CSV."""
     logger.info(f"Fetching history for symbol: {symbol}")
     data = get_company_history(symbol)
     logger.info(f"Fetched {len(data)} records for {symbol}")
@@ -105,7 +102,7 @@ def process_dataframe(raw_data):
 
 def calculate_median_performance(companies, selected_param='priceClose'):
     """
-    Calculate median-based percentage change for all companies.
+    Calculate median-based percentage change for all companies using cached data.
     
     Args:
         companies: List of company symbols
@@ -114,53 +111,75 @@ def calculate_median_performance(companies, selected_param='priceClose'):
     Returns:
         DataFrame with company, current value, median value, and percentage change
     """
-    logger.info(f"Calculating median performance for {len(companies)} companies")
+    logger.info(f"Calculating median performance for {len(companies)} companies from cached data")
     results = []
     
-    batch_size = min(5, len(companies))
-    logger.info(f"Processing in batches of {batch_size}")
+    # Get cache once to avoid repeated downloads
+    cache = get_csv_cache()
+    all_data = cache['data']
     
-    for i in range(0, len(companies), batch_size):
-        batch = companies[i:i + batch_size]
-        logger.info(f"Processing batch: {batch}")
+    for symbol in companies:
+        # Filter data for this symbol
+        symbol_data = [row for row in all_data if row['symbol'].lower() == symbol.lower()]
         
-        for symbol in batch:
-            history = fetch_history(symbol)
-            if not history:
-                logger.debug(f"No history for {symbol}")
-                continue
-            
-            df = pd.DataFrame(history)
-            if 'fetched_at' not in df.columns or 'priceClose' not in df.columns:
-                logger.debug(f"Missing columns for {symbol}")
-                continue
-            
-            df['fetched_at'] = pd.to_datetime(df['fetched_at'], errors='coerce')
-            df = df.sort_values('fetched_at', ascending=False).reset_index(drop=True)
-            
-            if df.empty:
-                logger.debug(f"Empty DataFrame for {symbol}")
-                continue
-            
-            latest = df.iloc[0]
-            current_val = latest.get(selected_param, 0)
-            
-            if len(df) > 0 and selected_param in df.columns:
-                median_val = df[selected_param].median()
+        if not symbol_data:
+            logger.debug(f"No data found for {symbol}")
+            continue
+        
+        # Sort by fetched_at descending to get latest first
+        symbol_df = pd.DataFrame(symbol_data)
+        symbol_df['fetched_at'] = pd.to_datetime(symbol_df['fetched_at'], errors='coerce')
+        symbol_df = symbol_df.sort_values('fetched_at', ascending=False).reset_index(drop=True)
+        
+        if symbol_df.empty:
+            continue
+        
+        latest = symbol_df.iloc[0]
+        
+        # Safely extract current value with type conversion
+        raw_current = latest.get(selected_param, 0)
+        if pd.notna(raw_current) and isinstance(raw_current, (str, float)):
+            try:
+                current_val = float(raw_current)
+            except (ValueError, TypeError):
+                current_val = 0.0
+        else:
+            current_val = 0.0
+        
+        # Calculate median from all available data points
+        if len(symbol_df) > 0 and selected_param in symbol_df.columns:
+            # Ensure we're calculating on numeric data only, filter out NaN/empty strings
+            col_values = symbol_df[selected_param].dropna()
+            if len(col_values) > 0 and pd.api.types.is_numeric_dtype(col_values):
+                median_val = float(col_values.median())
             else:
-                median_val = current_val
-            
-            if median_val != 0:
+                # No valid numeric data - use current_val but ensure it's numeric
+                try:
+                    median_val = float(current_val)
+                except (ValueError, TypeError):
+                    median_val = 0.0
+        else:
+            # Column doesn't exist or dataframe empty
+            try:
+                median_val = float(current_val)
+            except (ValueError, TypeError):
+                median_val = 0.0
+        
+        # Calculate percentage change safely
+        if abs(median_val) > 0.01:  # Avoid division by near-zero
+            try:
                 pct_change = ((current_val - median_val) / abs(median_val)) * 100
-            else:
-                pct_change = 0
-            
-            results.append({
-                'Symbol': symbol,
-                'Current Price': current_val,
-                'Median Price': median_val,
-                'Change %': pct_change
-            })
+            except (TypeError, ZeroDivisionError):
+                pct_change = 0.0
+        else:
+            pct_change = 0.0
+        
+        results.append({
+            'Symbol': symbol,
+            'Current Price': current_val,
+            'Median Price': median_val,
+            'Change %': pct_change
+        })
     
     if not results:
         logger.warning("No results generated")
@@ -168,7 +187,7 @@ def calculate_median_performance(companies, selected_param='priceClose'):
     
     df_results = pd.DataFrame(results)
     df_results = df_results.sort_values('Change %', ascending=False)
-    logger.info(f"Generated performance DataFrame with {len(df_results)} rows")
+    logger.info(f"Generated performance DataFrame with {len(df_results)} rows from cached data")
     
     return df_results
 
@@ -215,14 +234,30 @@ with col1:
     else:
         logger.info(f"Processing {len(df)} records")
         latest = df.iloc[0]
-        prev = df.iloc[1] if len(df) > 1 else latest
+        # Only use previous record if we have at least 2 valid records
+        prev = df.iloc[1] if len(df) > 1 and not latest.empty else None
         
-        price_change = latest.get('priceClose', 0) - prev.get('priceClose', 0)
-        change_pct = (price_change / prev.get('priceClose', 1)) * 100 if prev.get('priceClose', 0) else 0
+        # Safely extract numeric values
+        latest_price_close = float(latest.get('priceClose', 0)) if pd.notna(latest.get('priceClose')) else 0.0
+        prev_price_close = float(prev.get('priceClose', 0)) if prev is not None and pd.notna(prev.get('priceClose')) else 0.0
+        
+        # Safely format numeric values, handling string vs number type issues
+        def safe_format(value):
+            """Convert to float safely and format with commas."""
+            if value is None or pd.isna(value):
+                return "N/A"
+            try:
+                num = float(value)
+                return f"{num:,.2f}"
+            except (ValueError, TypeError):
+                return str(value)
+        
+        price_change = latest_price_close - prev_price_close
+        change_pct = (price_change / abs(prev_price_close)) * 100 if abs(prev_price_close) > 0 else 0
         
         st.metric(
             label=f"Latest {selected_param}",
-            value=f"{latest.get(selected_param, 0):,.2f}" if selected_param in latest else "N/A",
+            value=safe_format(latest.get(selected_param, 0)),
             delta=f"{price_change:+.2f} ({change_pct:+.2f}%)")
         
         if selected_param in numeric_cols and len(df) > 0:

@@ -1,19 +1,19 @@
-"""Test script to validate API client functionality"""
-import api_client
+"""Test script to validate CSV client functionality"""
+import csv_client
 
 print("Testing API Client...")
 print("=" * 50)
 
 # Test 1: Get available companies
 print("\n1. Fetching available companies...")
-companies = api_client.get_available_companies()
+companies = csv_client.get_available_companies()
 print(f"   Available companies: {companies[:5]}..." if len(companies) > 5 else f"   Available companies: {companies}")
 
 if companies:
     # Test 2: Get history for first company
     first_company = companies[0]
     print(f"\n2. Fetching history for '{first_company}'...")
-    history = api_client.get_company_history(first_company)
+    history = csv_client.get_company_history(first_company)
     
     if history:
         print(f"   Records found: {len(history)}")
@@ -32,7 +32,7 @@ else:
 # Test 3: Specific test for "14D" as mentioned in PLAN.md
 print("\n3. Testing specific symbol '14D'...")
 try:
-    history_14d = api_client.get_company_history("14D")
+    history_14d = csv_client.get_company_history("14D")
     if history_14d:
         print(f"   [OK] Successfully fetched history for 14D")
         print(f"   First record keys: {list(history_14d[0].keys())}")
