@@ -1,7 +1,7 @@
 ## Project Overview
 **Goal:** Build a highly performant Python dashboard for deep analysis of ASX stock trends.
 **Core Features:** Top N stock growth analysis, Trend-over-time visualization for selected stocks.
-**Tech Stack:** Python 3.x, Streamlit (UI), Plotly (Visualizations), Pandas (Data processing), Requests (API Client).
+**Tech Stack:** Python 3.x with UV, Streamlit (UI), Plotly (Visualizations), Pandas (Data processing), Requests (API Client).
 **API Base URL:** `http://192.168.0.50:30181`
 
 ---
@@ -18,8 +18,8 @@
 2.  **Define `requirements.txt`:**
     *   Add: `streamlit`, `pandas`, `plotly`, `requests`.
 3.  **Agent Validation Step:**
-    *   *Action:* Run `pip install -r requirements.txt`.
-    *   *Check:* Run `python -c "import streamlit, pandas, plotly, requests; print('Phase 1 Success')"` and ensure no import errors occur.
+    *   *Action:* Run `uv pip install -r requirements.txt`.
+    *   *Check:* Run `uv run python -c "import streamlit, pandas, plotly, requests; print('Phase 1 Success')"` and ensure no import errors occur.
 
 ---
 
@@ -38,7 +38,7 @@
     *   Parse the `data` field from the `JSONResponse` schema into a Pandas DataFrame.
 5.  **Agent Validation Step:**
     *   *Action:* Write a quick test script `tests/test_api.py` that asserts `get_health()` returns a 200 OK and successfully returns a list/dict of symbols.
-    *   *Check:* Run `python tests/test_api.py`.
+    *   *Check:* Run `uv run python tests/test_api.py`.
 
 ---
 
@@ -57,7 +57,7 @@
     *   Ensure the date column is a datetime object and sort chronologically.
 3.  **Agent Validation Step:**
     *   *Action:* Create `tests/test_processor.py`. Mock a small Pandas DataFrame with columns `['symbol', 'fetched_at', 'price']`, pass it to `calculate_top_n_growth()`.
-    *   *Check:* Assert the function correctly calculates percentage growth and returns the top stocks sorted correctly. Run `python tests/test_processor.py`.
+    *   *Check:* Assert the function correctly calculates percentage growth and returns the top stocks sorted correctly. Run `uv run python tests/test_processor.py`.
 
 ---
 
