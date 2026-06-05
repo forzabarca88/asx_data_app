@@ -1,7 +1,7 @@
 import streamlit as st
 import plotly.express as px
 import pandas as pd
-from api_client import get_bulk_csv_data, get_available_symbols, trigger_refresh, get_health, get_company_history
+from api_client import get_bulk_csv_data, get_available_symbols, get_health, get_company_history
 from data_processor import calculate_top_n_growth, prepare_trend_data, fetch_and_prepare_trend_data, detect_date_column, detect_price_column, detect_symbol_column
 
 st.set_page_config(page_title="ASX Dashboard", layout="wide")
@@ -44,15 +44,6 @@ def compute_trend(symbols):
 
 with st.sidebar:
     st.header("Controls")
-
-    if st.button("Refresh Data"):
-        st.cache_data.clear()
-        try:
-            trigger_refresh()
-            st.success("Data refresh triggered on server")
-        except Exception as e:
-            st.warning(f"Could not trigger server refresh: {e}")
-        st.rerun()
 
     try:
         symbols_list = load_symbols()

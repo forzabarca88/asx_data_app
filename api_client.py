@@ -78,7 +78,4 @@ def get_company_history(symbol, start_date=None, end_date=None, max_retries=3):
     raise last_error
 
 
-def trigger_refresh():
-    """Trigger a data refresh via POST /refresh."""
-    response = requests.post(f"{BASE_URL}/refresh", timeout=(10, 60))
-    return response.status_code
+
