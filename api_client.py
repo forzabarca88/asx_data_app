@@ -77,5 +77,3 @@ def get_company_history(symbol, start_date=None, end_date=None, max_retries=3):
 
     raise last_error
 
-
-
