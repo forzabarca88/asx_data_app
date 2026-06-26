@@ -1,4 +1,11 @@
+import json
+import numpy as np
 import pandas as pd
+
+# Sentinel values for data cleaning
+PE_SENTINEL = -99999.99
+FCF_YIELD_SENTINEL = -1.00000010000001e-05
+AU_TAX_RATE = 0.30
 
 
 def detect_date_column(df):
@@ -176,3 +183,211 @@ def fetch_and_prepare_trend_data(symbols, get_history_func):
     combined = combined.sort_values(date_col)
 
     return combined
+
+
+# ── Data Cleaning & Sentinel Handling ──────────────────────────────
+
+def clean_sentinel(value, sentinel=PE_SENTINEL):
+    """Clean sentinel values, returning NaN for known placeholders."""
+    if pd.isna(value):
+        return np.nan
+    try:
+        v = float(value)
+        return np.nan if v <= sentinel else v
+    except (ValueError, TypeError):
+        return np.nan
+
+
+def clean_yield_sentinel(value):
+    """Clean FCF yield sentinel values near zero."""
+    if pd.isna(value):
+        return np.nan
+    try:
+        v = float(value)
+        return np.nan if abs(v - FCF_YIELD_SENTINEL) < 1e-9 else v
+    except (ValueError, TypeError):
+        return np.nan
+
+
+def convert_excel_date(serial_date):
+    """Convert Excel serial date to pandas Timestamp.
+
+    Uses the Excel 1900 date system base of 1899-12-30,
+    which correctly accounts for Excel's phantom leap year bug.
+    """
+    if pd.isna(serial_date):
+        return pd.NaT
+    try:
+        serial = int(float(serial_date))
+    except (ValueError, TypeError):
+        return pd.NaT
+    base = pd.Timestamp(1899, 12, 30)
+    return base + pd.Timedelta(days=serial)
+
+
+def parse_income_statement(statement_str):
+    """Parse income statement JSON string (handles single-quoted Python dicts)."""
+    if pd.isna(statement_str) or not statement_str:
+        return []
+    try:
+        cleaned = str(statement_str).replace("'", '"')
+        statements = json.loads(cleaned)
+        return sorted(statements, key=lambda x: str(x.get("period", "")))
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+# ── Feature Computation Helpers ─────────────────────────────────────
+
+def _safe_numeric(value, default=np.nan):
+    """Safely convert a value to numeric, returning default on failure."""
+    try:
+        v = float(value)
+        return v if not np.isnan(v) else default
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_div(numerator, denominator, default=np.nan):
+    """Safe division returning default when denominator is zero or NaN."""
+    num = _safe_numeric(numerator)
+    den = _safe_numeric(denominator)
+    if pd.isna(num) or pd.isna(den) or den == 0:
+        return default
+    return num / den
+
+
+# ── Main Feature Engineering Pipeline ───────────────────────────────
+
+def engineer_features(df):
+    """
+    Compute all engineered features from bulk snapshot data.
+
+    Returns a DataFrame with one row per symbol (latest snapshot) containing:
+    - Valuation metrics: market_cap, cleaned_pe, earnings_yield, price_to_cash, free_cash_flow_yield
+    - Growth metrics: yoy_revenue_growth, revenue_cagr_3y, latest_net_margin,
+                     net_income_direction, earnings_quality_ratio
+    - Dividend metrics: raw_dividend_yield, franking_credit_multiplier,
+                       grossed_up_yield, dividend_payout_ratio, dividend_currency_risk
+    - Liquidity metrics: bid_ask_spread_pct, range_position_52w,
+                        volume_turnover_ratio, intraday_volatility
+    - Date: period_end_date (converted from Excel serial)
+    """
+    if df.empty:
+        return pd.DataFrame()
+
+    symbol_col = detect_symbol_column(df)
+    if not symbol_col:
+        raise ValueError(f"Could not detect symbol column. Found: {list(df.columns)}")
+
+    # Keep latest snapshot per symbol
+    date_col = detect_date_column(df)
+    if date_col and date_col in df.columns:
+        df = df.copy()
+        df[date_col] = pd.to_datetime(df[date_col], format="mixed", errors="coerce")
+        df = df.dropna(subset=[date_col])
+        idx = df.groupby(symbol_col)[date_col].idxmax()
+        df = df.loc[idx].copy()
+
+    features_rows = []
+
+    for _, row in df.iterrows():
+        features = {"symbol": row.get(symbol_col, "")}
+
+        # ── 1. Valuation & Size Metrics ──────────────────────────
+        shares = _safe_numeric(row.get("numOfShares"))
+        price = _safe_numeric(row.get("priceClose"))
+        features["market_cap"] = shares * price if not (pd.isna(shares) or pd.isna(price)) else np.nan
+
+        pe = _safe_numeric(row.get("priceEarningsRatio"))
+        features["cleaned_pe"] = clean_sentinel(pe)
+        features["earnings_yield"] = (
+            1 / features["cleaned_pe"] if not np.isnan(features["cleaned_pe"]) else np.nan
+        )
+
+        pcf = _safe_numeric(row.get("priceToCash"))
+        features["price_to_cash"] = clean_sentinel(pcf)
+
+        fcf_yield = _safe_numeric(row.get("freeCashFlowYield"))
+        features["free_cash_flow_yield"] = clean_yield_sentinel(fcf_yield)
+
+        # ── 2. Growth & Financial Health (from incomeStatement) ──
+        statements = parse_income_statement(row.get("incomeStatement"))
+
+        if len(statements) >= 2:
+            latest = statements[-1]
+            prev = statements[-2]
+
+            rev_latest = latest.get("revenue", 0) or 0
+            rev_prev = prev.get("revenue", 0) or 0
+            ni_latest = latest.get("netIncome", 0) or 0
+            cf_latest = latest.get("cashFlow", 0) or 0
+
+            features["yoy_revenue_growth"] = _safe_div(rev_latest - rev_prev, rev_prev)
+            features["latest_net_margin"] = _safe_div(ni_latest, rev_latest)
+            features["earnings_quality_ratio"] = _safe_div(cf_latest, ni_latest)
+
+            ni_prev = prev.get("netIncome", 0) or 0
+            features["net_income_direction"] = np.sign(ni_latest - ni_prev)
+        else:
+            features["yoy_revenue_growth"] = np.nan
+            features["latest_net_margin"] = np.nan
+            features["earnings_quality_ratio"] = np.nan
+            features["net_income_direction"] = np.nan
+
+        # 3-Year Revenue CAGR
+        if len(statements) >= 4:
+            rev_latest = statements[-1].get("revenue", 0) or 0
+            rev_3yr_ago = statements[-4].get("revenue", 0) or 0
+            if rev_3yr_ago > 0 and rev_latest > 0:
+                features["revenue_cagr_3y"] = (rev_latest / rev_3yr_ago) ** (1 / 3) - 1
+            else:
+                features["revenue_cagr_3y"] = np.nan
+        else:
+            features["revenue_cagr_3y"] = np.nan
+
+        # ── 3. Dividend & Franking Analytics ─────────────────────
+        raw_yield = _safe_numeric(row.get("yieldAnnual"))
+        franking = _safe_numeric(row.get("frankingPercent"), 0.0)
+        features["raw_dividend_yield"] = raw_yield
+
+        franking_pct = franking if not pd.isna(franking) else 0.0
+        franking_factor = 1.0 + (franking_pct / 100) * (AU_TAX_RATE / (1 - AU_TAX_RATE))
+        features["franking_credit_multiplier"] = franking_factor
+
+        features["grossed_up_yield"] = (
+            raw_yield * franking_factor if not pd.isna(raw_yield) else np.nan
+        )
+
+        eps = _safe_numeric(row.get("earningsPerShare"))
+        dividend = _safe_numeric(row.get("dividend"))
+        features["dividend_payout_ratio"] = _safe_div(dividend, eps)
+
+        div_currency = str(row.get("dividendCurrency", "AUD")).upper()
+        features["dividend_currency_risk"] = div_currency != "AUD"
+
+        # ── 4. Liquidity & Technical Metrics ─────────────────────
+        ask = _safe_numeric(row.get("priceAsk"))
+        bid = _safe_numeric(row.get("priceBid"))
+        features["bid_ask_spread_pct"] = _safe_div(ask - bid, price)
+
+        high52 = _safe_numeric(row.get("priceFiftyTwoWeekHigh"))
+        low52 = _safe_numeric(row.get("priceFiftyTwoWeekLow"))
+        denom = high52 - low52 if not (pd.isna(high52) or pd.isna(low52)) else np.nan
+        features["range_position_52w"] = (
+            _safe_div(price - low52, denom) if not pd.isna(denom) else np.nan
+        )
+
+        vol_avg = _safe_numeric(row.get("volumeAverage"))
+        features["volume_turnover_ratio"] = _safe_div(vol_avg, shares)
+
+        day_high = _safe_numeric(row.get("priceDayHigh"))
+        day_low = _safe_numeric(row.get("priceDayLow"))
+        features["intraday_volatility"] = _safe_div(day_high - day_low, price)
+
+        # ── 5. Date Conversion ───────────────────────────────────
+        features["period_end_date"] = convert_excel_date(row.get("fPeriodEndDate"))
+
+        features_rows.append(features)
+
+    return pd.DataFrame(features_rows)

@@ -15,15 +15,14 @@ def test_health_endpoint():
         assert len(refreshes) > 0, "Should return at least one symbol"
         print(f"PASS: /health returned {len(refreshes)} symbols. Status: {result['data']['status']}")
         print(f"Sample symbols: {list(refreshes.keys())[:5]}")
-        return True
     except requests.exceptions.RequestException as e:
         print(f"SKIP: API at {BASE_URL} is unreachable ({e})")
-        return False
+        raise
 
 
 if __name__ == "__main__":
-    passed = test_health_endpoint()
-    if passed:
+    try:
+        test_health_endpoint()
         print("\nPhase 2 validation: PASS")
-    else:
-        print("\nPhase 2 validation: SKIP (API unavailable)")
+    except Exception as e:
+        print(f"\nPhase 2 validation: FAIL ({e})")

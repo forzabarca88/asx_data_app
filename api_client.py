@@ -37,7 +37,7 @@ def get_bulk_csv_data(start_date=None, end_date=None, max_retries=3):
                 stream=True,
             )
             response.raise_for_status()
-            df = pd.read_csv(io.BytesIO(response.content))
+            df = pd.read_csv(io.BytesIO(response.content), low_memory=False)
             return df
         except Exception as e:
             last_error = e
