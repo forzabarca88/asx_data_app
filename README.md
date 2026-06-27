@@ -1,5 +1,7 @@
 # ASX Stock Snapshot Dashboard
 
+> ⚠️ This was a personal project primarily implemented with generative AI. Please review code accordingly before re-use.  
+
 Comprehensive feature engineering framework for ASX stock snapshot data, integrating valuation, growth, dividend/franking, and liquidity metrics into a Streamlit dashboard.
 
 ## Features
