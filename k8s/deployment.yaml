@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asx-dashboard
+  labels:
+    app: asx-dashboard
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: asx-dashboard
+  template:
+    metadata:
+      labels:
+        app: asx-dashboard
+    spec:
+      containers:
+        - name: asx-dashboard
+          image: asx-dashboard:latest
+          ports:
+            - containerPort: 8501
+              protocol: TCP
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8501
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8501
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          env:
+            - name: STREAMLIT_SERVER_HEADLESS
+              value: "true"
+            - name: STREAMLIT_SERVER_ENABLE_CORS
+              value: "false"
