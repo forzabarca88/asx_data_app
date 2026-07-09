@@ -215,6 +215,7 @@ with tab2:
             "cleaned_pe", "free_cash_flow_yield",
             "market_cap", "earnings_yield",
         ])
+        pe_data = pe_data[pe_data["market_cap"] > 0]
         if not pe_data.empty:
             fig_pe = px.scatter(
                 pe_data,
