@@ -14,6 +14,10 @@ from data_processor import (
     convert_excel_date,
     parse_income_statement,
     engineer_features,
+    detect_date_column,
+    detect_price_column,
+    detect_symbol_column,
+    detect_available_factors,
 )
 
 
@@ -106,11 +110,12 @@ def test_fetch_and_prepare_trend_data():
             {"symbol": [sym] * 2, "fetched_at": [d[0] for d in dates[sym]], "priceClose": [d[1] for d in dates[sym]]},
         )
 
-    result = fetch_and_prepare_trend_data(["A", "B"], mock_get_history)
+    result, failed = fetch_and_prepare_trend_data(["A", "B"], mock_get_history)
 
     assert len(result) == 4, f"Expected 4 rows, got {len(result)}"
     assert set(result["symbol"].unique()) == {"A", "B"}, "Should contain both symbols"
     assert not result.empty, "Should not be empty"
+    assert failed == [], f"Expected no failed symbols, got {failed}"
     dates = pd.to_datetime(result["fetched_at"])
     assert list(dates) == sorted(dates), "Dates should be sorted chronologically"
 
@@ -119,8 +124,9 @@ def test_fetch_and_prepare_trend_data():
 
 def test_fetch_and_prepare_empty():
     """Test fetch_and_prepare_trend_data with empty symbols list."""
-    result = fetch_and_prepare_trend_data([], lambda s: pd.DataFrame())
+    result, failed = fetch_and_prepare_trend_data([], lambda s: pd.DataFrame())
     assert result.empty, "Should return empty for empty symbol list"
+    assert failed == [], "Should return empty failed list for empty input"
     print("PASS: fetch_and_prepare_trend_data handles empty input")
 
 
@@ -160,6 +166,21 @@ def test_convert_excel_date():
     assert pd.isna(convert_excel_date(None))
     assert pd.isna(convert_excel_date(np.nan))
     print("PASS: convert_excel_date correctly converts serial dates")
+
+
+def test_convert_excel_date_fractional():
+    """Test that fractional Excel serial dates preserve sub-day precision."""
+    # 45838.5 = 2025-06-30 12:00:00 (half a day after midnight)
+    result = convert_excel_date(45838.5)
+    expected = pd.Timestamp(2025, 6, 30, 12, 0, 0)
+    assert result == expected, f"Expected {expected}, got {result}"
+
+    # 45838.25 = 2025-06-30 06:00:00 (quarter day)
+    result2 = convert_excel_date(45838.25)
+    expected2 = pd.Timestamp(2025, 6, 30, 6, 0, 0)
+    assert result2 == expected2, f"Expected {expected2}, got {result2}"
+
+    print("PASS: convert_excel_date preserves fractional day precision")
 
 
 def test_parse_income_statement():
@@ -356,6 +377,96 @@ def test_engineer_features_multi_symbol():
     print("PASS: engineer_features correctly deduplicates to latest snapshot")
 
 
+# ── Column Detection Tests ─────────────────────────────────────────
+
+def test_detect_date_column():
+    """Test date column detection with known and unknown schemas."""
+    df_known = pd.DataFrame({"fetched_at": ["2024-01-01"], "priceClose": [10.0]})
+    assert detect_date_column(df_known) == "fetched_at"
+
+    df_date = pd.DataFrame({"date": ["2024-01-01"], "priceClose": [10.0]})
+    assert detect_date_column(df_date) == "date"
+
+    df_timestamp = pd.DataFrame({"Timestamp": ["2024-01-01"], "priceClose": [10.0]})
+    assert detect_date_column(df_timestamp) == "Timestamp"
+
+    df_no_date = pd.DataFrame({"symbol": ["A"], "priceClose": [10.0]})
+    assert detect_date_column(df_no_date) is None
+
+    df_lowercase = pd.DataFrame({"date_col": ["2024-01-01"], "priceClose": [10.0]})
+    assert detect_date_column(df_lowercase) == "date_col"
+
+    print("PASS: detect_date_column correctly identifies date columns")
+
+
+def test_detect_price_column():
+    """Test price column detection with known and unknown schemas."""
+    df_known = pd.DataFrame({"priceClose": [10.0], "symbol": ["A"]})
+    assert detect_price_column(df_known) == "priceClose"
+
+    df_close = pd.DataFrame({"close": [10.0], "symbol": ["A"]})
+    assert detect_price_column(df_close) == "close"
+
+    df_last = pd.DataFrame({"last_price": [10.0], "symbol": ["A"]})
+    assert detect_price_column(df_last) == "last_price"
+
+    df_no_price = pd.DataFrame({"symbol": ["A"], "volume": [1000]})
+    assert detect_price_column(df_no_price) is None
+
+    print("PASS: detect_price_column correctly identifies price columns")
+
+
+def test_detect_symbol_column():
+    """Test symbol column detection with known and unknown schemas."""
+    df_known = pd.DataFrame({"symbol": ["A"], "priceClose": [10.0]})
+    assert detect_symbol_column(df_known) == "symbol"
+
+    df_company = pd.DataFrame({"Company": ["A"], "priceClose": [10.0]})
+    assert detect_symbol_column(df_company) == "Company"
+
+    df_ticker = pd.DataFrame({"Ticker": ["A"], "priceClose": [10.0]})
+    assert detect_symbol_column(df_ticker) == "Ticker"
+
+    df_no_symbol = pd.DataFrame({"priceClose": [10.0], "volume": [1000]})
+    assert detect_symbol_column(df_no_symbol) is None
+
+    print("PASS: detect_symbol_column correctly identifies symbol columns")
+
+
+def test_detect_available_factors():
+    """Test that only price/volume metrics are returned, not static numerics."""
+    df = pd.DataFrame({
+        "priceClose": [10.0], "priceHigh": [11.0], "priceLow": [9.0],
+        "volume": [1000], "numOfShares": [1000000],
+        "priceEarningsRatio": [25.0], "priceToCash": [15.0],
+        "frankingPercent": [80.0], "yieldAnnual": [0.05],
+    })
+    factors = detect_available_factors(df)
+
+    # Should include price/volume columns
+    assert "priceClose" in factors
+    assert "priceHigh" in factors
+    assert "priceLow" in factors
+    assert "volume" in factors
+
+    # Should NOT include static non-timeseries columns
+    assert "numOfShares" not in factors
+    assert "priceEarningsRatio" not in factors
+    assert "priceToCash" not in factors
+    assert "frankingPercent" not in factors
+    assert "yieldAnnual" not in factors
+
+    print(f"PASS: detect_available_factors returns only valid growth factors: {factors}")
+
+
+def test_detect_available_factors_empty():
+    """Test detect_available_factors with no matching columns."""
+    df = pd.DataFrame({"name": ["A"], "description": ["test"]})
+    factors = detect_available_factors(df)
+    assert factors == [], f"Expected empty list, got {factors}"
+    print("PASS: detect_available_factors returns empty list for non-numeric frame")
+
+
 if __name__ == "__main__":
     tests = [
         test_calculate_top_n_growth,
@@ -367,12 +478,18 @@ if __name__ == "__main__":
         test_clean_sentinel_pe,
         test_clean_yield_sentinel,
         test_convert_excel_date,
+        test_convert_excel_date_fractional,
         test_parse_income_statement,
         test_engineer_features_valuation,
         test_engineer_features_sentinels,
         test_engineer_features_fx_risk,
         test_engineer_features_empty,
         test_engineer_features_multi_symbol,
+        test_detect_date_column,
+        test_detect_price_column,
+        test_detect_symbol_column,
+        test_detect_available_factors,
+        test_detect_available_factors_empty,
     ]
 
     passed = 0

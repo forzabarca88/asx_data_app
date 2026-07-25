@@ -1,6 +1,9 @@
-import json
+import ast
+import logging
 import numpy as np
 import pandas as pd
+
+log = logging.getLogger("asx")
 
 # Sentinel values for data cleaning
 PE_SENTINEL = -99999.99
@@ -33,7 +36,12 @@ def detect_price_column(df):
 
 
 def detect_available_factors(df):
-    """Detect all numeric columns available for growth factor selection."""
+    """Detect numeric columns available for growth factor selection.
+
+    Only includes price/volume/time-series metrics. Excludes static
+    non-timeseries columns (numOfShares, valuation ratios, yield metrics,
+    sentinel fields) that would be meaningless as growth factors.
+    """
     factor_candidates = [
         "priceClose", "price_close", "close", "Close",
         "priceHigh", "price_high", "high", "High",
@@ -43,13 +51,24 @@ def detect_available_factors(df):
         "last_price", "Last_Price", "lastPrice", "last",
         "price", "Price",
     ]
+    # Columns that are numeric but NOT suitable as growth factors
+    excluded = {
+        "numOfShares", "priceEarningsRatio", "priceToCash",
+        "freeCashFlowYield", "frankingPercent", "yieldAnnual",
+        "earningsPerShare", "dividend", "dividendCurrency",
+    }
+    # Sentinel suffixes
+    excluded_suffixes = ("Sentinel", "sentinel")
+
     available = []
     for col in factor_candidates:
         if col in df.columns:
             available.append(col)
     for col in df.columns:
-        if col not in available and pd.api.types.is_numeric_dtype(df[col]):
-            available.append(col)
+        if col not in available and col not in excluded:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                if not any(col.endswith(s) for s in excluded_suffixes):
+                    available.append(col)
     return available
 
 
@@ -95,10 +114,13 @@ def calculate_top_n_growth(df, n=10, factor=None):
     if date_col and date_col in df.columns:
         df[date_col] = pd.to_datetime(df[date_col], format='mixed', errors="coerce")
         df = df.dropna(subset=[date_col])
+        # Sort is load-bearing: groupby.first/last depend on row order
         df = df.sort_values([symbol_col, date_col])
     else:
         df = df.reset_index(drop=True)
 
+    # groupby.first/last are order-dependent; the sort above ensures
+    # "first" = earliest date, "last" = latest date per symbol
     grouped = df.groupby(symbol_col)[factor_col].agg(["first", "last"]).reset_index()
     grouped = grouped[grouped["first"] != 0]
     grouped["growth_pct"] = (
@@ -150,10 +172,14 @@ def fetch_and_prepare_trend_data(symbols, get_history_func):
         symbols: list of symbol strings
         get_history_func: function(symbol) -> DataFrame for fetching history
 
-    Returns combined dataframe with symbol, fetched_at, priceClose columns.
+    Returns:
+        Tuple of (combined DataFrame, list of failed symbol names).
+        Logs warnings for symbols that fail to fetch.
     """
+    failed_symbols = []
+
     if not symbols:
-        return pd.DataFrame()
+        return pd.DataFrame(), failed_symbols
 
     all_data = []
     for sym in symbols:
@@ -161,11 +187,13 @@ def fetch_and_prepare_trend_data(symbols, get_history_func):
             hist_df = get_history_func(sym)
             if not hist_df.empty:
                 all_data.append(hist_df)
-        except Exception:
+        except Exception as e:
+            log.warning("Failed to fetch history for %s: %s", sym, e)
+            failed_symbols.append(sym)
             continue
 
     if not all_data:
-        return pd.DataFrame()
+        return pd.DataFrame(), failed_symbols
 
     combined = pd.concat(all_data, ignore_index=True)
 
@@ -174,7 +202,7 @@ def fetch_and_prepare_trend_data(symbols, get_history_func):
     symbol_col = detect_symbol_column(combined)
 
     if not date_col or not price_col or not symbol_col:
-        return pd.DataFrame()
+        return pd.DataFrame(), failed_symbols
 
     combined = combined.dropna(subset=[date_col, price_col])
     combined[date_col] = pd.to_datetime(combined[date_col], format='mixed')
@@ -182,7 +210,7 @@ def fetch_and_prepare_trend_data(symbols, get_history_func):
     combined = combined.dropna(subset=[price_col])
     combined = combined.sort_values(date_col)
 
-    return combined
+    return combined, failed_symbols
 
 
 # ── Data Cleaning & Sentinel Handling ──────────────────────────────
@@ -214,11 +242,12 @@ def convert_excel_date(serial_date):
 
     Uses the Excel 1900 date system base of 1899-12-30,
     which correctly accounts for Excel's phantom leap year bug.
+    Fractional days are preserved (e.g., 45838.5 -> 2025-06-30 12:00:00).
     """
     if pd.isna(serial_date):
         return pd.NaT
     try:
-        serial = int(float(serial_date))
+        serial = float(serial_date)
     except (ValueError, TypeError):
         return pd.NaT
     base = pd.Timestamp(1899, 12, 30)
@@ -226,14 +255,18 @@ def convert_excel_date(serial_date):
 
 
 def parse_income_statement(statement_str):
-    """Parse income statement JSON string (handles single-quoted Python dicts)."""
+    """Parse income statement string (handles single-quoted Python dicts).
+
+    Uses ast.literal_eval instead of naive string replacement, which is
+    safe for arbitrary Python literal expressions and avoids breaking on
+    apostrophes in field values (e.g., company names like "O'Brien").
+    """
     if pd.isna(statement_str) or not statement_str:
         return []
     try:
-        cleaned = str(statement_str).replace("'", '"')
-        statements = json.loads(cleaned)
+        statements = ast.literal_eval(str(statement_str))
         return sorted(statements, key=lambda x: str(x.get("period", "")))
-    except (json.JSONDecodeError, TypeError):
+    except (ValueError, SyntaxError, TypeError):
         return []
 
 
