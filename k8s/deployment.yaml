@@ -5,7 +5,7 @@ metadata:
   labels:
     app: asx-dashboard
 spec:
-  replicas: 2
+  replicas: 1  # Single replica: @st.cache_data is per-process; multiple pods duplicate API load
   selector:
     matchLabels:
       app: asx-dashboard
@@ -44,3 +44,5 @@ spec:
               value: "true"
             - name: STREAMLIT_SERVER_ENABLE_CORS
               value: "false"
+            - name: ASX_API_BASE_URL
+              value: "http://192.168.0.50:30181"

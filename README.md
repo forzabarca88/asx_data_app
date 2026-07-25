@@ -36,4 +36,4 @@ pytest tests/ -v
 - `api_client.py` — ASX API data fetching with retry logic
 - `data_processor.py` — Feature engineering pipeline (sentinel cleaning, date conversion, income statement parsing)
 - `app.py` — Streamlit dashboard with 5 tabs and sidebar filters
-- `tests/` — 16 tests covering all processor functions and API health
+- `tests/` — 25 tests covering all processor functions, column detection, and API health (mocked)
