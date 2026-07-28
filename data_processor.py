@@ -164,13 +164,15 @@ def prepare_trend_data(df, symbols):
     return filtered
 
 
-def fetch_and_prepare_trend_data(symbols, get_history_func):
+def fetch_and_prepare_trend_data(symbols, get_history_func, start_date=None, end_date=None):
     """
     Fetch individual history data for each symbol and combine for trend chart.
 
     Args:
         symbols: list of symbol strings
-        get_history_func: function(symbol) -> DataFrame for fetching history
+        get_history_func: function(symbol, start_date, end_date) -> DataFrame for fetching history
+        start_date: ISO date string (YYYY-MM-DD) for filtering, or None for full history
+        end_date: ISO date string (YYYY-MM-DD) for filtering, or None for full history
 
     Returns:
         Tuple of (combined DataFrame, list of failed symbol names).
@@ -184,7 +186,7 @@ def fetch_and_prepare_trend_data(symbols, get_history_func):
     all_data = []
     for sym in symbols:
         try:
-            hist_df = get_history_func(sym)
+            hist_df = get_history_func(sym, start_date=start_date, end_date=end_date)
             if not hist_df.empty:
                 all_data.append(hist_df)
         except Exception as e:

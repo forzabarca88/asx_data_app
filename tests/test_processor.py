@@ -101,7 +101,7 @@ def test_na_handling():
 
 def test_fetch_and_prepare_trend_data():
     """Test history fetching and combining for trend chart."""
-    def mock_get_history(sym):
+    def mock_get_history(sym, **kwargs):
         dates = {
             "A": [("2024-01-01", 10.0), ("2024-06-01", 12.0)],
             "B": [("2024-01-01", 20.0), ("2024-06-01", 18.0)],
@@ -124,7 +124,7 @@ def test_fetch_and_prepare_trend_data():
 
 def test_fetch_and_prepare_empty():
     """Test fetch_and_prepare_trend_data with empty symbols list."""
-    result, failed = fetch_and_prepare_trend_data([], lambda s: pd.DataFrame())
+    result, failed = fetch_and_prepare_trend_data([], lambda s, **kwargs: pd.DataFrame())
     assert result.empty, "Should return empty for empty symbol list"
     assert failed == [], "Should return empty failed list for empty input"
     print("PASS: fetch_and_prepare_trend_data handles empty input")

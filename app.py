@@ -1,3 +1,4 @@
+import datetime
 import logging
 import streamlit as st
 import plotly.express as px
@@ -25,10 +26,10 @@ st.set_page_config(page_title="ASX Dashboard", layout="wide")
 st.title("ASX Stock Analysis Dashboard")
 
 
-@st.cache_data(ttl=3600, max_entries=10)
-def load_data():
+@st.cache_data(ttl=3600, max_entries=20)
+def load_data(start_date=None, end_date=None):
     """Load bulk CSV data from API with caching."""
-    return get_bulk_csv_data()
+    return get_bulk_csv_data(start_date=start_date, end_date=end_date)
 
 
 @st.cache_data(ttl=3600, max_entries=10)
@@ -50,19 +51,19 @@ def compute_top_n(df, n, factor):
     return calculate_top_n_growth(df, n, factor)
 
 
-@st.cache_data(ttl=3600, max_entries=128)
-def fetch_history(symbol):
+@st.cache_data(ttl=3600, max_entries=256)
+def fetch_history(symbol, start_date=None, end_date=None):
     """Fetch history for a single symbol with caching."""
-    return get_company_history(symbol)
+    return get_company_history(symbol, start_date=start_date, end_date=end_date)
 
 
-@st.cache_data(ttl=3600, max_entries=64)
-def compute_trend(symbols):
+@st.cache_data(ttl=3600, max_entries=128)
+def compute_trend(symbols, start_date=None, end_date=None):
     """Fetch and prepare trend data for selected symbols with caching.
 
     Returns tuple of (DataFrame, list_of_failed_symbols).
     """
-    return fetch_and_prepare_trend_data(symbols, fetch_history)
+    return fetch_and_prepare_trend_data(symbols, fetch_history, start_date=start_date, end_date=end_date)
 
 
 @st.cache_data(ttl=3600, max_entries=8)
@@ -71,10 +72,30 @@ def compute_engineered(df):
     return engineer_features(df)
 
 
+# ── Date range initialization ─────────────────────────────────────
+# Initialize defaults before any code reads from session_state.
+# The st.date_input widget (rendered later in the sidebar) picks up
+# these defaults on first run and persists them thereafter.
+_today = datetime.date.today()
+st.session_state.setdefault(
+    "date_range",
+    [_today - datetime.timedelta(days=90), _today],
+)
+
+# Read dates from session state and convert to ISO format for API
+start_date = st.session_state["date_range"][0]
+end_date = st.session_state["date_range"][1]
+start_date_str = start_date.isoformat()
+end_date_str = end_date.isoformat()
+
 try:
-    df = load_data()
+    df = load_data(start_date=start_date_str, end_date=end_date_str)
 except Exception as e:
     st.error(f"Failed to load data: {e}")
+    st.stop()
+
+if df.empty:
+    st.warning("No data available for the selected date range. Try a wider date range.")
     st.stop()
 
 date_col = detect_date_column(df)
@@ -104,6 +125,16 @@ if date_col:
 # ── Sidebar Controls ────────────────────────────────────────────────
 with st.sidebar:
     st.header("Controls")
+
+    # Date range filter (defaults to last 90 days, set via setdefault above)
+    today = datetime.date.today()
+
+    st.date_input(
+        "Date range",
+        min_value=datetime.date(2020, 1, 1),
+        max_value=today,
+        key="date_range",
+    )
 
     selected_symbols = st.multiselect(
         "Select Stocks for Trend Analysis",
@@ -415,7 +446,7 @@ if tab5.open:
 
         if selected_symbols:
             try:
-                trend_df, failed_syms = compute_trend(selected_symbols)
+                trend_df, failed_syms = compute_trend(selected_symbols, start_date=start_date_str, end_date=end_date_str)
 
                 if failed_syms:
                     st.warning(f"Could not fetch history for: {', '.join(sorted(failed_syms))}")
