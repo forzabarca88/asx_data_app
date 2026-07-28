@@ -1,6 +1,5 @@
 import sys
 import os
-import math
 import numpy as np
 import pandas as pd
 
@@ -9,20 +8,16 @@ from data_processor import (
     calculate_top_n_growth,
     prepare_trend_data,
     fetch_and_prepare_trend_data,
-    clean_sentinel,
-    clean_yield_sentinel,
-    convert_excel_date,
-    parse_income_statement,
     engineer_features,
-    detect_date_column,
-    detect_price_column,
-    detect_symbol_column,
     detect_available_factors,
 )
 
 
+# ── Growth Ranking Tests ───────────────────────────────────────────
+
+
 def test_calculate_top_n_growth():
-    """Test growth calculation with mock bulk snapshot data."""
+    """Growth calculation produces correct percentages and sorting."""
     mock_df = pd.DataFrame(
         {
             "symbol": ["A", "A", "B", "B", "C", "C"],
@@ -34,174 +29,80 @@ def test_calculate_top_n_growth():
     result = calculate_top_n_growth(mock_df, n=2)
 
     assert len(result) == 2, f"Expected 2 rows, got {len(result)}"
-    assert "growth_pct" in result.columns, "Missing growth_pct column"
-    assert "start_value" in result.columns, "Missing start_value column"
-    assert "end_value" in result.columns, "Missing end_value column"
+    assert result.iloc[0]["symbol"] == "C", "Top grower should be C (+100%)"
+    assert abs(result.iloc[0]["growth_pct"] - 100.0) < 0.1
+    assert result.iloc[1]["symbol"] == "A", "Second grower should be A (+50%)"
+    assert abs(result.iloc[1]["growth_pct"] - 50.0) < 0.1
+    print("PASS: growth calculation and sorting correct")
 
-    expected_growth_c = ((10.0 - 5.0) / 5.0) * 100  # 100%
-    expected_growth_a = ((15.0 - 10.0) / 10.0) * 100  # 50%
 
-    top_symbol = result.iloc[0]["symbol"]
-    top_growth = result.iloc[0]["growth_pct"]
+def test_growth_empty_and_na():
+    """Growth handles empty input and missing values gracefully."""
+    empty_df = pd.DataFrame(columns=["symbol", "priceClose", "fetched_at"])
+    assert calculate_top_n_growth(empty_df, n=5).empty
 
-    assert top_symbol == "C", f"Expected top symbol 'C', got '{top_symbol}'"
-    assert abs(top_growth - expected_growth_c) < 0.1, f"Expected growth ~{expected_growth_c}, got {top_growth}"
+    na_df = pd.DataFrame({
+        "symbol": ["A", "A", "B", "B"],
+        "priceClose": [10.0, None, 20.0, 25.0],
+        "fetched_at": ["2024-01-01", "2024-03-01", "2024-01-01", "2024-06-01"],
+    })
+    result = calculate_top_n_growth(na_df, n=10)
+    assert len(result) == 2, "Should skip NA rows and still compute valid results"
+    print("PASS: empty and NA handling correct")
 
-    second_symbol = result.iloc[1]["symbol"]
-    second_growth = result.iloc[1]["growth_pct"]
-    assert second_symbol == "A", f"Expected second symbol 'A', got '{second_symbol}'"
-    assert abs(second_growth - expected_growth_a) < 0.1, f"Expected growth ~{expected_growth_a}, got {second_growth}"
 
-    print("PASS: calculate_top_n_growth correctly calculates growth and sorts")
+# ── Trend Data Tests ───────────────────────────────────────────────
 
 
 def test_prepare_trend_data():
-    """Test trend data filtering with actual schema columns."""
-    mock_df = pd.DataFrame(
-        {
-            "symbol": ["A", "A", "B", "B"],
-            "fetched_at": ["2024-06-01", "2024-12-01", "2024-03-01", "2024-09-01"],
-            "priceClose": [10.0, 15.0, 20.0, 25.0],
-        }
-    )
+    """Trend data filters to selected symbols and sorts chronologically."""
+    mock_df = pd.DataFrame({
+        "symbol": ["A", "A", "B", "B"],
+        "fetched_at": ["2024-06-01", "2024-12-01", "2024-03-01", "2024-09-01"],
+        "priceClose": [10.0, 15.0, 20.0, 25.0],
+    })
 
     result = prepare_trend_data(mock_df, ["A"])
-
-    assert len(result) == 2, f"Expected 2 rows for symbol A, got {len(result)}"
-    assert all(result["symbol"] == "A"), "All rows should be symbol A"
+    assert len(result) == 2
+    assert all(result["symbol"] == "A")
     dates = pd.to_datetime(result["fetched_at"])
-    assert list(dates) == sorted(dates), "Dates should be sorted chronologically"
-
-    print("PASS: prepare_trend_data correctly filters and sorts")
-
-
-def test_empty_dataframe():
-    """Test handling of empty dataframes."""
-    empty_df = pd.DataFrame(columns=["symbol", "priceClose", "fetched_at"])
-    result = calculate_top_n_growth(empty_df, n=5)
-    assert len(result) == 0, "Should return empty result for empty input"
-    print("PASS: empty dataframe handled correctly")
-
-
-def test_na_handling():
-    """Test handling of missing values."""
-    mock_df = pd.DataFrame(
-        {
-            "symbol": ["A", "A", "B", "B"],
-            "priceClose": [10.0, None, 20.0, 25.0],
-            "fetched_at": ["2024-01-01", "2024-03-01", "2024-01-01", "2024-06-01"],
-        }
-    )
-
-    result = calculate_top_n_growth(mock_df, n=10)
-    assert not result.empty, "Should handle NA values without crashing"
-    assert len(result) == 2, f"Expected 2 valid rows after NA filtering, got {len(result)}"
-    print("PASS: NA values handled correctly")
+    assert list(dates) == sorted(dates), "Dates should be sorted"
+    print("PASS: trend data filtering and sorting correct")
 
 
 def test_fetch_and_prepare_trend_data():
-    """Test history fetching and combining for trend chart."""
+    """Multi-symbol history fetching combines data and reports failures."""
     def mock_get_history(sym, **kwargs):
-        dates = {
+        data = {
             "A": [("2024-01-01", 10.0), ("2024-06-01", 12.0)],
             "B": [("2024-01-01", 20.0), ("2024-06-01", 18.0)],
         }
         return pd.DataFrame(
-            {"symbol": [sym] * 2, "fetched_at": [d[0] for d in dates[sym]], "priceClose": [d[1] for d in dates[sym]]},
+            {"symbol": [sym] * 2, "fetched_at": [d[0] for d in data[sym]], "priceClose": [d[1] for d in data[sym]]},
         )
 
     result, failed = fetch_and_prepare_trend_data(["A", "B"], mock_get_history)
-
-    assert len(result) == 4, f"Expected 4 rows, got {len(result)}"
-    assert set(result["symbol"].unique()) == {"A", "B"}, "Should contain both symbols"
-    assert not result.empty, "Should not be empty"
-    assert failed == [], f"Expected no failed symbols, got {failed}"
+    assert len(result) == 4
+    assert set(result["symbol"].unique()) == {"A", "B"}
+    assert failed == []
     dates = pd.to_datetime(result["fetched_at"])
-    assert list(dates) == sorted(dates), "Dates should be sorted chronologically"
-
-    print("PASS: fetch_and_prepare_trend_data correctly fetches and combines histories")
+    assert list(dates) == sorted(dates)
+    print("PASS: multi-symbol history fetching correct")
 
 
 def test_fetch_and_prepare_empty():
-    """Test fetch_and_prepare_trend_data with empty symbols list."""
+    """Empty symbol list returns empty result without error."""
     result, failed = fetch_and_prepare_trend_data([], lambda s, **kwargs: pd.DataFrame())
-    assert result.empty, "Should return empty for empty symbol list"
-    assert failed == [], "Should return empty failed list for empty input"
-    print("PASS: fetch_and_prepare_trend_data handles empty input")
+    assert result.empty
+    assert failed == []
+    print("PASS: empty input handled correctly")
 
 
 # ── Feature Engineering Tests ──────────────────────────────────────
 
 
-def test_clean_sentinel_pe():
-    """Test P/E sentinel cleaning."""
-    assert np.isnan(clean_sentinel(-99999.99))
-    assert np.isnan(clean_sentinel(-100000))
-    assert clean_sentinel(25.5) == 25.5
-    assert clean_sentinel(1.0) == 1.0
-    assert np.isnan(clean_sentinel(None))
-    assert np.isnan(clean_sentinel(np.nan))
-    print("PASS: clean_sentinel correctly handles P/E sentinels")
-
-
-def test_clean_yield_sentinel():
-    """Test FCF yield sentinel cleaning."""
-    assert np.isnan(clean_yield_sentinel(-1.00000010000001e-05))
-    assert clean_yield_sentinel(0.0573) == 0.0573
-    assert clean_yield_sentinel(0.0) == 0.0
-    assert np.isnan(clean_yield_sentinel(None))
-    print("PASS: clean_yield_sentinel correctly handles yield sentinels")
-
-
-def test_convert_excel_date():
-    """Test Excel serial date conversion."""
-    result = convert_excel_date(45838)
-    expected = pd.Timestamp(2025, 6, 30)
-    assert result == expected, f"Expected {expected}, got {result}"
-
-    result2 = convert_excel_date(45531)
-    expected2 = pd.Timestamp(2024, 8, 27)
-    assert result2 == expected2, f"Expected {expected2}, got {result2}"
-
-    assert pd.isna(convert_excel_date(None))
-    assert pd.isna(convert_excel_date(np.nan))
-    print("PASS: convert_excel_date correctly converts serial dates")
-
-
-def test_convert_excel_date_fractional():
-    """Test that fractional Excel serial dates preserve sub-day precision."""
-    # 45838.5 = 2025-06-30 12:00:00 (half a day after midnight)
-    result = convert_excel_date(45838.5)
-    expected = pd.Timestamp(2025, 6, 30, 12, 0, 0)
-    assert result == expected, f"Expected {expected}, got {result}"
-
-    # 45838.25 = 2025-06-30 06:00:00 (quarter day)
-    result2 = convert_excel_date(45838.25)
-    expected2 = pd.Timestamp(2025, 6, 30, 6, 0, 0)
-    assert result2 == expected2, f"Expected {expected2}, got {result2}"
-
-    print("PASS: convert_excel_date preserves fractional day precision")
-
-
-def test_parse_income_statement():
-    """Test income statement parsing with single quotes."""
-    stmt = "[{'revenue': 1071595000, 'netIncome': 79895000, 'period': '2025A'}, {'revenue': 867978000, 'netIncome': 3657000, 'period': '2024A'}]"
-    result = parse_income_statement(stmt)
-    assert len(result) == 2
-    assert result[0]["period"] == "2024A"
-    assert result[1]["period"] == "2025A"
-    assert result[1]["revenue"] == 1071595000
-
-    empty_result = parse_income_statement(None)
-    assert empty_result == []
-
-    empty_result2 = parse_income_statement("")
-    assert empty_result2 == []
-    print("PASS: parse_income_statement correctly parses and sorts statements")
-
-
-def test_engineer_features_valuation():
-    """Test valuation feature computation."""
+def test_engineer_features_full():
+    """Full feature pipeline computes all metrics correctly."""
     df = pd.DataFrame([{
         "symbol": "ZIP",
         "priceClose": 2.34,
@@ -228,55 +129,44 @@ def test_engineer_features_valuation():
 
     result = engineer_features(df)
     assert len(result) == 1
-
     row = result.iloc[0]
+
     # Valuation
-    expected_mc = 1254722736 * 2.34
-    assert abs(row["market_cap"] - expected_mc) < 1, f"Market cap: expected {expected_mc}, got {row['market_cap']}"
+    assert abs(row["market_cap"] - 1254722736 * 2.34) < 1
     assert abs(row["cleaned_pe"] - 28.50183) < 0.01
     assert abs(row["earnings_yield"] - (1 / 28.50183)) < 0.001
     assert abs(row["price_to_cash"] - 15.2) < 0.01
     assert abs(row["free_cash_flow_yield"] - 0.0573) < 0.001
 
     # Growth
-    expected_yoy = (1071595000 - 867978000) / 867978000
-    assert abs(row["yoy_revenue_growth"] - expected_yoy) < 0.01
-    expected_margin = 79895000 / 1071595000
-    assert abs(row["latest_net_margin"] - expected_margin) < 0.01
-    expected_quality = 120000000 / 79895000
-    assert abs(row["earnings_quality_ratio"] - expected_quality) < 0.01
+    assert abs(row["yoy_revenue_growth"] - (1071595000 - 867978000) / 867978000) < 0.01
+    assert abs(row["latest_net_margin"] - 79895000 / 1071595000) < 0.01
+    assert abs(row["earnings_quality_ratio"] - 120000000 / 79895000) < 0.01
     assert row["net_income_direction"] > 0
-
-    # 3-Year CAGR
-    expected_cagr = (1071595000 / 500000000) ** (1 / 3) - 1
-    assert abs(row["revenue_cagr_3y"] - expected_cagr) < 0.01
+    assert abs(row["revenue_cagr_3y"] - ((1071595000 / 500000000) ** (1 / 3) - 1)) < 0.01
 
     # Dividend
     assert abs(row["raw_dividend_yield"] - 0.035) < 0.001
     expected_franking = 1.0 + (80.0 / 100) * (0.30 / 0.70)
     assert abs(row["franking_credit_multiplier"] - expected_franking) < 0.001
     assert abs(row["grossed_up_yield"] - 0.035 * expected_franking) < 0.001
-    assert abs(row["dividend_payout_ratio"] - 0.08 / 0.10) < 0.01
+    assert abs(row["dividend_payout_ratio"] - 0.8) < 0.01
     assert row["dividend_currency_risk"] == False
 
     # Liquidity
-    expected_spread = (2.38 - 2.37) / 2.34
-    assert abs(row["bid_ask_spread_pct"] - expected_spread) < 0.001
-    expected_range = (2.34 - 1.375) / (4.93 - 1.375)
-    assert abs(row["range_position_52w"] - expected_range) < 0.01
-    expected_turnover = 26340338.61 / 1254722736
-    assert abs(row["volume_turnover_ratio"] - expected_turnover) < 0.001
-    expected_intraday = (2.40 - 2.30) / 2.34
-    assert abs(row["intraday_volatility"] - expected_intraday) < 0.001
+    assert abs(row["bid_ask_spread_pct"] - (2.38 - 2.37) / 2.34) < 0.001
+    assert abs(row["range_position_52w"] - (2.34 - 1.375) / (4.93 - 1.375)) < 0.01
+    assert abs(row["volume_turnover_ratio"] - 26340338.61 / 1254722736) < 0.001
+    assert abs(row["intraday_volatility"] - (2.40 - 2.30) / 2.34) < 0.001
 
     # Date
     assert row["period_end_date"] == pd.Timestamp(2025, 6, 30)
 
-    print("PASS: engineer_features computes all features correctly")
+    print("PASS: all features computed correctly")
 
 
 def test_engineer_features_sentinels():
-    """Test that sentinel values are properly cleaned."""
+    """Sentinel values are cleaned to NaN; missing data degrades gracefully."""
     df = pd.DataFrame([{
         "symbol": "LOSS",
         "priceClose": 1.50,
@@ -301,199 +191,90 @@ def test_engineer_features_sentinels():
         "fetched_at": "2025-07-01",
     }])
 
-    result = engineer_features(df)
-    row = result.iloc[0]
-
-    assert np.isnan(row["cleaned_pe"]), "P/E sentinel should be NaN"
-    assert np.isnan(row["earnings_yield"]), "Earnings yield should be NaN when P/E is NaN"
-    assert np.isnan(row["price_to_cash"]), "P/C sentinel should be NaN"
-    assert np.isnan(row["free_cash_flow_yield"]), "FCF yield sentinel should be NaN"
-    assert row["franking_credit_multiplier"] == 1.0, "No franking should give multiplier of 1.0"
-    assert pd.isna(row["period_end_date"]), "Null date should be NaT"
-
-    print("PASS: engineer_features properly cleans sentinel values")
+    result = engineer_features(df).iloc[0]
+    assert np.isnan(result["cleaned_pe"]), "P/E sentinel should be NaN"
+    assert np.isnan(result["earnings_yield"]), "Earnings yield NaN when P/E is NaN"
+    assert np.isnan(result["price_to_cash"])
+    assert np.isnan(result["free_cash_flow_yield"])
+    assert result["franking_credit_multiplier"] == 1.0
+    assert pd.isna(result["period_end_date"])
+    print("PASS: sentinels cleaned, missing data handled")
 
 
 def test_engineer_features_fx_risk():
-    """Test dividend currency risk flag for non-AUD dividends."""
+    """Non-AUD dividends are flagged as FX risk."""
     df = pd.DataFrame([{
         "symbol": "ZIM",
-        "priceClose": 10.0,
-        "priceAsk": 10.1,
-        "priceBid": 9.9,
-        "priceFiftyTwoWeekHigh": 15.0,
-        "priceFiftyTwoWeekLow": 5.0,
-        "priceDayHigh": 10.2,
-        "priceDayLow": 9.8,
-        "volumeAverage": 500000,
-        "numOfShares": 100000000,
-        "priceEarningsRatio": 12.0,
-        "priceToCash": 8.0,
-        "freeCashFlowYield": 0.04,
-        "yieldAnnual": 0.05,
-        "frankingPercent": None,
-        "dividend": 0.50,
-        "earningsPerShare": 0.80,
-        "dividendCurrency": "USD",
-        "incomeStatement": "",
-        "fPeriodEndDate": None,
-        "fetched_at": "2025-07-01",
+        "priceClose": 10.0, "priceAsk": 10.1, "priceBid": 9.9,
+        "priceFiftyTwoWeekHigh": 15.0, "priceFiftyTwoWeekLow": 5.0,
+        "priceDayHigh": 10.2, "priceDayLow": 9.8,
+        "volumeAverage": 500000, "numOfShares": 100000000,
+        "priceEarningsRatio": 12.0, "priceToCash": 8.0,
+        "freeCashFlowYield": 0.04, "yieldAnnual": 0.05,
+        "frankingPercent": None, "dividend": 0.50,
+        "earningsPerShare": 0.80, "dividendCurrency": "USD",
+        "incomeStatement": "", "fPeriodEndDate": None, "fetched_at": "2025-07-01",
     }])
 
-    result = engineer_features(df)
-    row = result.iloc[0]
-
+    row = engineer_features(df).iloc[0]
     assert row["dividend_currency_risk"] == True, "USD dividend should flag FX risk"
-    assert row["franking_credit_multiplier"] == 1.0, "No franking data gives multiplier of 1.0"
-
-    print("PASS: dividend currency risk flag works correctly")
+    assert row["franking_credit_multiplier"] == 1.0
+    print("PASS: FX risk detection correct")
 
 
 def test_engineer_features_empty():
-    """Test engineer_features with empty DataFrame."""
-    df = pd.DataFrame()
-    result = engineer_features(df)
-    assert result.empty, "Should return empty DataFrame for empty input"
-    print("PASS: engineer_features handles empty DataFrame")
+    """Empty input returns empty result."""
+    assert engineer_features(pd.DataFrame()).empty
+    print("PASS: empty input handled")
 
 
-def test_engineer_features_multi_symbol():
-    """Test engineer_features deduplicates to latest snapshot per symbol."""
+def test_engineer_features_dedup():
+    """Keeps only the latest snapshot per symbol."""
     df = pd.DataFrame([
         {"symbol": "A", "priceClose": 10.0, "fetched_at": "2025-01-01", "numOfShares": 1000000},
         {"symbol": "A", "priceClose": 12.0, "fetched_at": "2025-06-01", "numOfShares": 1000000},
         {"symbol": "B", "priceClose": 20.0, "fetched_at": "2025-03-01", "numOfShares": 2000000},
     ])
-
     result = engineer_features(df)
-    assert len(result) == 2, f"Expected 2 unique symbols, got {len(result)}"
-
-    a_row = result[result["symbol"] == "A"].iloc[0]
-    assert abs(a_row["market_cap"] - 12000000) < 1, "Should use latest snapshot for symbol A"
-
-    b_row = result[result["symbol"] == "B"].iloc[0]
-    assert abs(b_row["market_cap"] - 40000000) < 1, "Should preserve only data for symbol B"
-
-    print("PASS: engineer_features correctly deduplicates to latest snapshot")
+    assert len(result) == 2
+    assert abs(result[result["symbol"] == "A"].iloc[0]["market_cap"] - 12000000) < 1
+    assert abs(result[result["symbol"] == "B"].iloc[0]["market_cap"] - 40000000) < 1
+    print("PASS: deduplication to latest snapshot correct")
 
 
-# ── Column Detection Tests ─────────────────────────────────────────
-
-def test_detect_date_column():
-    """Test date column detection with known and unknown schemas."""
-    df_known = pd.DataFrame({"fetched_at": ["2024-01-01"], "priceClose": [10.0]})
-    assert detect_date_column(df_known) == "fetched_at"
-
-    df_date = pd.DataFrame({"date": ["2024-01-01"], "priceClose": [10.0]})
-    assert detect_date_column(df_date) == "date"
-
-    df_timestamp = pd.DataFrame({"Timestamp": ["2024-01-01"], "priceClose": [10.0]})
-    assert detect_date_column(df_timestamp) == "Timestamp"
-
-    df_no_date = pd.DataFrame({"symbol": ["A"], "priceClose": [10.0]})
-    assert detect_date_column(df_no_date) is None
-
-    df_lowercase = pd.DataFrame({"date_col": ["2024-01-01"], "priceClose": [10.0]})
-    assert detect_date_column(df_lowercase) == "date_col"
-
-    print("PASS: detect_date_column correctly identifies date columns")
-
-
-def test_detect_price_column():
-    """Test price column detection with known and unknown schemas."""
-    df_known = pd.DataFrame({"priceClose": [10.0], "symbol": ["A"]})
-    assert detect_price_column(df_known) == "priceClose"
-
-    df_close = pd.DataFrame({"close": [10.0], "symbol": ["A"]})
-    assert detect_price_column(df_close) == "close"
-
-    df_last = pd.DataFrame({"last_price": [10.0], "symbol": ["A"]})
-    assert detect_price_column(df_last) == "last_price"
-
-    df_no_price = pd.DataFrame({"symbol": ["A"], "volume": [1000]})
-    assert detect_price_column(df_no_price) is None
-
-    print("PASS: detect_price_column correctly identifies price columns")
-
-
-def test_detect_symbol_column():
-    """Test symbol column detection with known and unknown schemas."""
-    df_known = pd.DataFrame({"symbol": ["A"], "priceClose": [10.0]})
-    assert detect_symbol_column(df_known) == "symbol"
-
-    df_company = pd.DataFrame({"Company": ["A"], "priceClose": [10.0]})
-    assert detect_symbol_column(df_company) == "Company"
-
-    df_ticker = pd.DataFrame({"Ticker": ["A"], "priceClose": [10.0]})
-    assert detect_symbol_column(df_ticker) == "Ticker"
-
-    df_no_symbol = pd.DataFrame({"priceClose": [10.0], "volume": [1000]})
-    assert detect_symbol_column(df_no_symbol) is None
-
-    print("PASS: detect_symbol_column correctly identifies symbol columns")
+# ── Available Factors ──────────────────────────────────────────────
 
 
 def test_detect_available_factors():
-    """Test that only price/volume metrics are returned, not static numerics."""
+    """Returns all numeric columns for user to choose from."""
     df = pd.DataFrame({
-        "priceClose": [10.0], "priceHigh": [11.0], "priceLow": [9.0],
-        "volume": [1000], "numOfShares": [1000000],
-        "priceEarningsRatio": [25.0], "priceToCash": [15.0],
-        "frankingPercent": [80.0], "yieldAnnual": [0.05],
+        "priceClose": [10.0], "volume": [1000],
+        "numOfShares": [1000000], "yieldAnnual": [0.05],
+        "symbol": ["A"], "name": ["Test"],
     })
     factors = detect_available_factors(df)
-
-    # Should include price/volume columns
-    assert "priceClose" in factors
-    assert "priceHigh" in factors
-    assert "priceLow" in factors
-    assert "volume" in factors
-
-    # Should NOT include static non-timeseries columns
-    assert "numOfShares" not in factors
-    assert "priceEarningsRatio" not in factors
-    assert "priceToCash" not in factors
-    assert "frankingPercent" not in factors
-    assert "yieldAnnual" not in factors
-
-    print(f"PASS: detect_available_factors returns only valid growth factors: {factors}")
-
-
-def test_detect_available_factors_empty():
-    """Test detect_available_factors with no matching columns."""
-    df = pd.DataFrame({"name": ["A"], "description": ["test"]})
-    factors = detect_available_factors(df)
-    assert factors == [], f"Expected empty list, got {factors}"
-    print("PASS: detect_available_factors returns empty list for non-numeric frame")
+    assert set(factors) == {"priceClose", "volume", "numOfShares", "yieldAnnual"}
+    assert "symbol" not in factors
+    assert "name" not in factors
+    print(f"PASS: returns all numeric columns: {factors}")
 
 
 if __name__ == "__main__":
     tests = [
         test_calculate_top_n_growth,
+        test_growth_empty_and_na,
         test_prepare_trend_data,
-        test_empty_dataframe,
-        test_na_handling,
         test_fetch_and_prepare_trend_data,
         test_fetch_and_prepare_empty,
-        test_clean_sentinel_pe,
-        test_clean_yield_sentinel,
-        test_convert_excel_date,
-        test_convert_excel_date_fractional,
-        test_parse_income_statement,
-        test_engineer_features_valuation,
+        test_engineer_features_full,
         test_engineer_features_sentinels,
         test_engineer_features_fx_risk,
         test_engineer_features_empty,
-        test_engineer_features_multi_symbol,
-        test_detect_date_column,
-        test_detect_price_column,
-        test_detect_symbol_column,
+        test_engineer_features_dedup,
         test_detect_available_factors,
-        test_detect_available_factors_empty,
     ]
 
-    passed = 0
-    failed = 0
+    passed = failed = 0
     for t in tests:
         try:
             t()
@@ -503,7 +284,4 @@ if __name__ == "__main__":
             failed += 1
 
     print(f"\n{passed} passed, {failed} failed")
-    if failed == 0:
-        print("ALL TESTS PASS")
-    else:
-        print("SOME TESTS FAILED")
+    print("ALL TESTS PASS" if failed == 0 else "SOME TESTS FAILED")

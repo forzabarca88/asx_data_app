@@ -36,46 +36,14 @@ def detect_price_column(df):
 
 
 def detect_available_factors(df):
-    """Detect numeric columns available for growth factor selection.
-
-    Only includes price/volume/time-series metrics. Excludes static
-    non-timeseries columns (numOfShares, valuation ratios, yield metrics,
-    sentinel fields) that would be meaningless as growth factors.
-    """
-    factor_candidates = [
-        "priceClose", "price_close", "close", "Close",
-        "priceHigh", "price_high", "high", "High",
-        "priceLow", "price_low", "low", "Low",
-        "priceOpen", "price_open", "open", "Open",
-        "volume", "Volume", "trade_volume", "tradeVolume",
-        "last_price", "Last_Price", "lastPrice", "last",
-        "price", "Price",
-    ]
-    # Columns that are numeric but NOT suitable as growth factors
-    excluded = {
-        "numOfShares", "priceEarningsRatio", "priceToCash",
-        "freeCashFlowYield", "frankingPercent", "yieldAnnual",
-        "earningsPerShare", "dividend", "dividendCurrency",
-    }
-    # Sentinel suffixes
-    excluded_suffixes = ("Sentinel", "sentinel")
-
-    available = []
-    for col in factor_candidates:
-        if col in df.columns:
-            available.append(col)
-    for col in df.columns:
-        if col not in available and col not in excluded:
-            if pd.api.types.is_numeric_dtype(df[col]):
-                if not any(col.endswith(s) for s in excluded_suffixes):
-                    available.append(col)
-    return available
+    """Detect all numeric columns available for growth factor selection."""
+    return [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
 
 
 def detect_symbol_column(df):
     """Detect the symbol column in the dataframe."""
-    symbol_candidates = ["symbol", "Symbol", "company", "Company", "ticker", "Ticker", "company_id", "companyName"]
-    for col in symbol_candidates:
+    candidates = ["symbol", "Symbol", "company", "Company", "ticker", "Ticker", "company_id", "companyName"]
+    for col in candidates:
         if col in df.columns:
             return col
     return None

@@ -72,15 +72,18 @@ def compute_engineered(df):
     return engineer_features(df)
 
 
-# ── Date range initialization ─────────────────────────────────────
-# Initialize defaults before any code reads from session_state.
-# The st.date_input widget (rendered later in the sidebar) picks up
-# these defaults on first run and persists them thereafter.
+# ── Session state initialization ──────────────────────────────────
+# Initialize all filter defaults before any code reads from session_state.
+# This ensures values persist even when widgets are conditionally hidden
+# (e.g., feature filters only render when eng_df is not empty).
 _today = datetime.date.today()
 st.session_state.setdefault(
     "date_range",
     [_today - datetime.timedelta(days=90), _today],
 )
+st.session_state.setdefault("min_market_cap", 0.0)
+st.session_state.setdefault("min_yield", 0.0)
+st.session_state.setdefault("show_only_franked", False)
 
 # Read dates from session state and convert to ISO format for API
 start_date = st.session_state["date_range"][0]
@@ -158,20 +161,17 @@ with st.sidebar:
         min_market_cap = st.number_input(
             "Min Market Cap ($M)",
             min_value=0.0,
-            value=0.0,
             step=100.0,
             key="min_market_cap",
         )
         min_yield = st.number_input(
             "Min Grossed-Up Yield (%)",
             min_value=0.0,
-            value=0.0,
             step=0.5,
             key="min_yield",
         )
         show_only_franked = st.checkbox(
             "Franked Dividends Only",
-            value=False,
             key="show_only_franked",
         )
 
@@ -202,11 +202,12 @@ if tab1.open:
 
         if growth_factor:
             try:
-                # Cache at source granularity (full df), filter outside
-                top_n_df = compute_top_n(df, top_n, growth_factor)
+                # Filter input data by feature filters, then compute top N
+                growth_df = df
                 if not filtered_eng.empty:
                     allowed_symbols = set(filtered_eng["symbol"])
-                    top_n_df = top_n_df[top_n_df["symbol"].isin(allowed_symbols)]
+                    growth_df = df[df[symbol_col].isin(allowed_symbols)]
+                top_n_df = compute_top_n(growth_df, top_n, growth_factor)
 
                 if not top_n_df.empty:
                     fig_bar = px.bar(
