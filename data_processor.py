@@ -3,12 +3,9 @@ import logging
 import numpy as np
 import pandas as pd
 
-log = logging.getLogger("asx")
+from config import AU_TAX_RATE, FCF_YIELD_SENTINEL, PE_SENTINEL
 
-# Sentinel values for data cleaning
-PE_SENTINEL = -99999.99
-FCF_YIELD_SENTINEL = -1.00000010000001e-05
-AU_TAX_RATE = 0.30
+log = logging.getLogger("asx")
 
 
 def detect_date_column(df):
@@ -102,34 +99,6 @@ def calculate_top_n_growth(df, n=10, factor=None):
     )
 
     return result.rename(columns={"first": "start_value", "last": "end_value"})
-
-
-def prepare_trend_data(df, symbols):
-    """
-    Filter dataframe for selected symbols and prepare for trend chart.
-
-    Returns dataframe with datetime index sorted chronologically.
-    """
-    if not symbols or df.empty:
-        return pd.DataFrame()
-
-    symbol_col = detect_symbol_column(df)
-    date_col = detect_date_column(df)
-    price_col = detect_price_column(df)
-
-    if not symbol_col or not date_col or not price_col:
-        raise ValueError(
-            f"Could not detect required columns. Found: {list(df.columns)}"
-        )
-
-    filtered = df[df[symbol_col].isin(symbols)].copy()
-    filtered = filtered.dropna(subset=[date_col, price_col])
-    filtered[date_col] = pd.to_datetime(filtered[date_col], format='mixed')
-    filtered[price_col] = pd.to_numeric(filtered[price_col], errors="coerce")
-    filtered = filtered.dropna(subset=[price_col])
-    filtered = filtered.sort_values(date_col)
-
-    return filtered
 
 
 def fetch_and_prepare_trend_data(symbols, get_history_func, start_date=None, end_date=None):
