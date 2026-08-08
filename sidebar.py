@@ -14,8 +14,13 @@ import streamlit as st
 
 from config import (
     DATE_INPUT_MIN,
+    HELP_DATE_RANGE,
     HELP_GROWTH_FACTOR,
+    HELP_MIN_GROSSED_UP_YIELD,
+    HELP_MIN_MARKET_CAP,
+    HELP_SHOW_ONLY_FRANKED,
     HELP_STOCKS_FOR_TREND,
+    HELP_TOP_N_GROWTH,
     ICON_CONTROLS,
     ICON_DATE_RANGE,
     ICON_FEATURE_FILTERS,
@@ -112,6 +117,7 @@ def render_sidebar(
             min_value=DATE_INPUT_MIN,
             max_value=today,
             key="date_range",
+            help=HELP_DATE_RANGE,
         )
 
         # ── Stock multiselect ───────────────────────────────────────
@@ -143,6 +149,7 @@ def render_sidebar(
             min_value=TOP_N_MIN,
             max_value=TOP_N_MAX,
             key="top_n",
+            help=HELP_TOP_N_GROWTH,
         )
 
         # ── Feature filters (conditional on engineered data) ─────────
@@ -155,6 +162,7 @@ def render_sidebar(
                 step=STEP_MIN_MARKET_CAP,
                 key="min_market_cap",
                 persist_state="session",
+                help=HELP_MIN_MARKET_CAP,
             )
 
             st.number_input(
@@ -163,6 +171,7 @@ def render_sidebar(
                 step=STEP_MIN_YIELD,
                 key="min_yield",
                 persist_state="session",
+                help=HELP_MIN_GROSSED_UP_YIELD,
             )
 
             st.toggle(
@@ -170,6 +179,7 @@ def render_sidebar(
                 key="show_only_franked",
                 persist_state="session",
                 label_visibility="collapsed",
+                help=HELP_SHOW_ONLY_FRANKED,
             )
 
     # ── Return filter values from session state ──────────────────────

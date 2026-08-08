@@ -64,6 +64,18 @@ from config import (
     DESC_VALUATION,
     DESC_DIVIDEND,
     DESC_LIQUIDITY,
+    TOOLTIP_GROWTH_COLS,
+    TOOLTIP_VALUATION_COLS,
+    TOOLTIP_DIVIDEND_COLS,
+    TOOLTIP_LIQUIDITY_COLS,
+    CAPTION_GROWTH_BAR,
+    CAPTION_SIZE_BAR,
+    CAPTION_PE_FCF_SCATTER,
+    CAPTION_DIVIDEND_BAR,
+    CAPTION_FRANKING_DIST,
+    CAPTION_LIQUIDITY_SCATTER,
+    CAPTION_RANGE_HIST,
+    CAPTION_TREND_LINE,
     VALUATION_SOURCE_COLS,
     VALUATION_DISPLAY_RENAME,
     VALUATION_DISPLAY_COLS,
@@ -89,6 +101,8 @@ from config import (
     CHART_TITLE_FRANKING_DISTRIBUTION,
     LABEL_FRANKED,
     LABEL_UNFRANKED,
+    HELP_FRANKED,
+    HELP_UNFRANKED,
     THEME_GREEN_COLOR,
     THEME_ORANGE_COLOR,
 )
@@ -250,7 +264,27 @@ if tab1.open:
                             sort="-" + CHART_LABEL_GROWTH_PCT,
                             color=THEME_GREEN_COLOR,
                         )
-                        st.dataframe(top_n_df, hide_index=True)
+                        st.caption(CAPTION_GROWTH_BAR)
+                        st.dataframe(
+                            top_n_df,
+                            hide_index=True,
+                            column_config={
+                                "symbol": st.column_config.TextColumn(
+                                    "Stock", help=TOOLTIP_GROWTH_COLS["symbol"]
+                                ),
+                                "start_value": st.column_config.NumberColumn(
+                                    "Start value", help=TOOLTIP_GROWTH_COLS["start_value"]
+                                ),
+                                "end_value": st.column_config.NumberColumn(
+                                    "End value", help=TOOLTIP_GROWTH_COLS["end_value"]
+                                ),
+                                "growth_pct": st.column_config.NumberColumn(
+                                    "Growth (%)",
+                                    format="%.2f%%",
+                                    help=TOOLTIP_GROWTH_COLS["growth_pct"],
+                                ),
+                            },
+                        )
                 else:
                     st.warning(MSG_NO_GROWTH_DATA, icon=ICON_CALLOUT_WARNING)
 
@@ -276,19 +310,19 @@ if tab2.open:
                     column_config={
                         "symbol": st.column_config.TextColumn("Symbol"),
                         "Market cap ($M)": st.column_config.NumberColumn(
-                            "Market cap ($M)", format="$%.2f"
+                            "Market cap ($M)", format="$%.2f", help=TOOLTIP_VALUATION_COLS["Market cap ($M)"]
                         ),
                         "cleaned_pe": st.column_config.NumberColumn(
-                            "P/E ratio", format="%.2f"
+                            "P/E ratio", format="%.2f", help=TOOLTIP_VALUATION_COLS["cleaned_pe"]
                         ),
                         "earnings_yield": st.column_config.NumberColumn(
-                            "Earnings yield", format="%.4f"
+                            "Earnings yield", format="%.4f", help=TOOLTIP_VALUATION_COLS["earnings_yield"]
                         ),
                         "price_to_cash": st.column_config.NumberColumn(
-                            "Price/cash", format="%.2f"
+                            "Price/cash", format="%.2f", help=TOOLTIP_VALUATION_COLS["price_to_cash"]
                         ),
                         "free_cash_flow_yield": st.column_config.NumberColumn(
-                            "FCF yield", format="%.4f"
+                            "FCF yield", format="%.4f", help=TOOLTIP_VALUATION_COLS["free_cash_flow_yield"]
                         ),
                     },
                     hide_index=True,
@@ -315,6 +349,7 @@ if tab2.open:
                     color="_color",
                     sort=False,
                 )
+                st.caption(CAPTION_SIZE_BAR)
 
             pe_data = filtered_eng.dropna(subset=[
                 "cleaned_pe", "free_cash_flow_yield",
@@ -325,6 +360,7 @@ if tab2.open:
                 with st.container(border=True):
                     chart = render_pe_fcf_scatter(pe_data)
                     st.altair_chart(chart)
+                    st.caption(CAPTION_PE_FCF_SCATTER)
         elif eng_df.empty:
             st.info(MSG_FEATURE_DATA_NOT_AVAILABLE, icon=ICON_CALLOUT_INFO)
         else:
@@ -352,18 +388,20 @@ if tab3.open:
                     column_config={
                         "symbol": st.column_config.TextColumn("Symbol"),
                         "Raw yield (%)": st.column_config.NumberColumn(
-                            "Raw yield (%)", format="%.2f%%"
+                            "Raw yield (%)", format="%.2f%%", help=TOOLTIP_DIVIDEND_COLS["Raw yield (%)"]
                         ),
                         "Franking multiplier": st.column_config.NumberColumn(
-                            "Franking multiplier", format="%.4f"
+                            "Franking multiplier", format="%.4f", help=TOOLTIP_DIVIDEND_COLS["Franking multiplier"]
                         ),
                         "Grossed-up yield (%)": st.column_config.NumberColumn(
-                            "Grossed-up yield (%)", format="%.2f%%"
+                            "Grossed-up yield (%)", format="%.2f%%", help=TOOLTIP_DIVIDEND_COLS["Grossed-up yield (%)"]
                         ),
                         "Payout ratio (%)": st.column_config.NumberColumn(
-                            "Payout ratio (%)", format="%.1f%%"
+                            "Payout ratio (%)", format="%.1f%%", help=TOOLTIP_DIVIDEND_COLS["Payout ratio (%)"]
                         ),
-                        "currency_risk": st.column_config.TextColumn("Currency risk"),
+                        "currency_risk": st.column_config.TextColumn(
+                            "Currency risk", help=TOOLTIP_DIVIDEND_COLS["currency_risk"]
+                        ),
                     },
                     hide_index=True,
                 )
@@ -384,6 +422,7 @@ if tab3.open:
                         sort="-" + CHART_LABEL_GROSS_DIVIDEND_YIELD,
                         color=THEME_ORANGE_COLOR,
                     )
+                    st.caption(CAPTION_DIVIDEND_BAR)
 
             franked_count = int(
                 (filtered_eng["franking_credit_multiplier"] > FRANKING_CREDIT_FRANKED_THRESHOLD).sum()
@@ -399,9 +438,10 @@ if tab3.open:
                 st.subheader(f":material/pie_chart: {CHART_TITLE_FRANKING_DISTRIBUTION}")
                 c1, c2 = st.columns(2, border=True)
                 with c1:
-                    st.metric(LABEL_FRANKED, f"{franked_count:,}", franked_pct, border=True)
+                    st.metric(LABEL_FRANKED, f"{franked_count:,}", franked_pct, border=True, help=HELP_FRANKED)
                 with c2:
-                    st.metric(LABEL_UNFRANKED, f"{unfranked_count:,}", unfranked_pct, border=True)
+                    st.metric(LABEL_UNFRANKED, f"{unfranked_count:,}", unfranked_pct, border=True, help=HELP_UNFRANKED)
+                st.caption(CAPTION_FRANKING_DIST)
         elif eng_df.empty:
             st.info(MSG_FEATURE_DATA_NOT_AVAILABLE, icon=ICON_CALLOUT_INFO)
         else:
@@ -429,16 +469,16 @@ if tab4.open:
                     column_config={
                         "symbol": st.column_config.TextColumn("Symbol"),
                         "Bid-Ask spread (%)": st.column_config.NumberColumn(
-                            "Bid-Ask spread (%)", format="%.3f%%"
+                            "Bid-Ask spread (%)", format="%.3f%%", help=TOOLTIP_LIQUIDITY_COLS["Bid-Ask spread (%)"]
                         ),
                         "52W range position (%)": st.column_config.NumberColumn(
-                            "52W range position (%)", format="%.1f%%"
+                            "52W range position (%)", format="%.1f%%", help=TOOLTIP_LIQUIDITY_COLS["52W range position (%)"]
                         ),
                         "Volume turnover (%)": st.column_config.NumberColumn(
-                            "Volume turnover (%)", format="%.4f%%"
+                            "Volume turnover (%)", format="%.4f%%", help=TOOLTIP_LIQUIDITY_COLS["Volume turnover (%)"]
                         ),
                         "Intraday volatility (%)": st.column_config.NumberColumn(
-                            "Intraday volatility (%)", format="%.3f%%"
+                            "Intraday volatility (%)", format="%.3f%%", help=TOOLTIP_LIQUIDITY_COLS["Intraday volatility (%)"]
                         ),
                     },
                     hide_index=True,
@@ -453,12 +493,14 @@ if tab4.open:
                 with st.container(border=True):
                     chart = render_liquidity_scatter(liq_clean)
                     st.altair_chart(chart)
+                    st.caption(CAPTION_LIQUIDITY_SCATTER)
 
             range_data = filtered_eng["range_position_52w"].dropna()
             if not range_data.empty:
                 with st.container(border=True):
                     chart = render_range_histogram(range_data)
                     st.altair_chart(chart)
+                    st.caption(CAPTION_RANGE_HIST)
         elif eng_df.empty:
             st.info(MSG_FEATURE_DATA_NOT_AVAILABLE, icon=ICON_CALLOUT_INFO)
         else:
@@ -491,7 +533,16 @@ if tab5.open:
                         chart = render_trend_line(trend_df, date_col, y_col, symbol_col, y_label)
                         with st.container(border=True):
                             st.altair_chart(chart, width="stretch")
-                            st.dataframe(trend_df[[date_col, symbol_col, y_col]], hide_index=True)
+                            st.caption(CAPTION_TREND_LINE)
+                            st.dataframe(
+                                trend_df[[date_col, symbol_col, y_col]],
+                                hide_index=True,
+                                column_config={
+                                    date_col: st.column_config.TextColumn("Date"),
+                                    symbol_col: st.column_config.TextColumn("Stock"),
+                                    y_col: st.column_config.NumberColumn(y_label),
+                                },
+                            )
                 else:
                     st.warning(MSG_NO_TREND_DATA, icon=ICON_CALLOUT_WARNING)
 

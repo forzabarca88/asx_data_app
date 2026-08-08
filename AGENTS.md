@@ -18,7 +18,7 @@
 - `app.py` — Thin layout orchestrator (imports from modules, tab structure, data loading, caching)
 - `api_client.py` — HTTP client for the ASX data API (bulk export, company history, health)
 - `charts.py` — Chart builders (3 native bar charts return DataFrames for `st.bar_chart`; 2 Altair scatter charts; 1 Altair histogram; 1 Altair line chart uses long-format data directly for `st.altair_chart`)
-- `config.py` — Central configuration module (labels, icons, defaults, chart params, messages; theme colors read from `.streamlit/config.toml` via `tomllib`; sentence case exception constants)
+- `config.py` — Central configuration module (labels, icons, defaults, chart params, tooltips/help text, captions, messages; theme colors read from `.streamlit/config.toml` via `tomllib`; sentence case exception constants)
 - `sidebar.py` — Sidebar widget rendering and session state initialization (`init_session_state_defaults` sets defaults; `render_sidebar` renders widgets)
 - `data_processor.py` — Data processing pipeline (column detection, feature engineering, growth calculation)
 - `requirements.txt` — Production Python dependencies
@@ -27,6 +27,7 @@
 - `tests/__init__.py` — Makes tests a proper Python package
 - `tests/test_api.py` — Unit tests for API client (mocks via `unittest.mock`)
 - `tests/test_processor.py` — Unit tests for data processing pipeline
+- `tests/test_config.py` — Unit tests validating centralised tooltip/help dict keys match displayed columns
 - `tests/e2e/__init__.py` — Makes e2e tests a proper Python package
 - `tests/e2e/conftest.py` — Playwright fixtures (browser, page, app launcher, mock API server, screenshots)
 - `tests/e2e/mock_api_server.py` — Mock HTTP server for the ASX API (deterministic responses for reliable E2E tests)

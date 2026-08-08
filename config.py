@@ -53,6 +53,20 @@ LABEL_SHOW_ONLY_FRANKED = "Show only franked"
 # Widget help text
 HELP_STOCKS_FOR_TREND = "Choose stocks to compare in the trend chart"
 HELP_GROWTH_FACTOR = "Select the metric to calculate growth over time"
+HELP_DATE_RANGE = "Select the start and end dates for the data shown in every tab. Defaults to the last 90 days."
+HELP_TOP_N_GROWTH = "Number of best-performing stocks to show in the Top N growth ranking and bar chart."
+HELP_MIN_MARKET_CAP = (
+    "Only include companies with a market capitalisation (share price × number of shares) "
+    "at or above this amount. $M = millions of dollars; use 0 to include all sizes."
+)
+HELP_MIN_GROSSED_UP_YIELD = (
+    "Only include companies whose grossed-up dividend yield is at least this percentage. "
+    "Use 0 to include all yields."
+)
+HELP_SHOW_ONLY_FRANKED = (
+    "Show only companies whose dividends carry franking credits. Franked dividends include a "
+    "tax credit for company tax already paid, which can reduce the tax you owe on the income."
+)
 
 # Widget step values
 STEP_MIN_MARKET_CAP = 100.0
@@ -198,6 +212,10 @@ CHART_TITLE_TREND_TEMPLATE = "{} trends over time"
 LABEL_FRANKED = "Franked"
 LABEL_UNFRANKED = "Unfranked"
 
+# Franked / unfranked metric card help
+HELP_FRANKED = "Stocks paying franked dividends — dividends carrying a franking credit for company tax already paid, which reduces tax owed on that income."
+HELP_UNFRANKED = "Stocks paying unfranked (0% franked) dividends — no franking credit, so tax is paid on the full amount."
+
 # ── Dataframe Column Config ─────────────────────────────────────────
 
 # Tab 2: Valuation Matrix — source columns and display columns
@@ -279,6 +297,88 @@ LIQUIDITY_DISPLAY_COLS: list[str] = [
     "intraday_vol",
 ]
 
+# ── Tooltip / Help Text ─────────────────────────────────────────────
+# Maps of dataframe column keys (as used in column_config) to their
+# human-readable explanations. Shown as tooltips on column headers.
+
+# Tab 1: Growth rankings dataframe
+TOOLTIP_GROWTH_COLS: dict[str, str] = {
+    "symbol": "Stock symbol (e.g. BHP, CBA).",
+    "start_value": "Value of the selected metric at the earliest date in the selected range.",
+    "end_value": "Value of the selected metric at the latest date in the selected range.",
+    "growth_pct": (
+        "Percentage change in the selected metric from start to end: (end − start) / start × 100. "
+        "Negative values mean the metric fell over the period."
+    ),
+}
+
+# Tab 2: Valuation matrix dataframe columns
+TOOLTIP_VALUATION_COLS: dict[str, str] = {
+    "Market cap ($M)": "Total company value in millions of dollars (share price × number of shares).",
+    "cleaned_pe": (
+        "Price-to-earnings ratio: share price ÷ annual earnings per share. A high P/E can mean high "
+        "expected growth; a very low P/E may indicate a cheap stock or depressed earnings."
+    ),
+    "earnings_yield": (
+        "Inverse of the P/E ratio (earnings ÷ price). Profit generated per dollar of share price, "
+        "allowing direct comparison with bond yields."
+    ),
+    "price_to_cash": (
+        "Price-to-cash ratio: share price ÷ cash flow per share. How expensive the stock is relative "
+        "to the cash the company generates."
+    ),
+    "free_cash_flow_yield": (
+        "Free cash flow yield: free cash flow per share ÷ share price. Annual free cash flow relative "
+        "to price — higher generally means better value."
+    ),
+}
+
+# Tab 3: Dividend analysis dataframe columns
+TOOLTIP_DIVIDEND_COLS: dict[str, str] = {
+    "Raw yield (%)": "Annual dividend per share ÷ share price, as a percentage, before any franking credit benefit.",
+    "Franking multiplier": (
+        "A factor applied to the raw yield to reflect franking credits. Above 1.0 = franked (up to 100% "
+        "credit); exactly 1.0 = unfranked."
+    ),
+    "Grossed-up yield (%)": (
+        "Raw yield × franking multiplier. The pre-tax yield reported to the ATO including the franking "
+        "credit — effectively your fully franked yield."
+    ),
+    "Payout ratio (%)": (
+        "Dividends paid as a share of earnings (dividend ÷ earnings per share). Above ~80% may mean the "
+        "dividend is less sustainable; above 100% it is likely to be cut."
+    ),
+    "currency_risk": (
+        "Dividend currency: 'AUD' (paid in Australian dollars) or 'FX Risk' (paid in a foreign currency, "
+        "exposing you to exchange-rate movements)."
+    ),
+}
+
+# Tab 4: Liquidity & risk dataframe columns
+TOOLTIP_LIQUIDITY_COLS: dict[str, str] = {
+    "Bid-Ask spread (%)": (
+        "Difference between the highest buyer bid and lowest seller ask, as a % of price. A wider spread "
+        "means higher trading cost and lower liquidity."
+    ),
+    "52W range position (%)": "Where the current price sits in its 52-week high–low range: 0% = yearly low, 100% = yearly high.",
+    "Volume turnover (%)": (
+        "Average daily trading volume ÷ total shares outstanding. A low ratio means the stock is thinly "
+        "traded and harder to buy or sell."
+    ),
+    "Intraday volatility (%)": "Average daily high-to-low range as a % of price. Higher values mean more intraday movement.",
+}
+
+# ── Chart Captions ─────────────────────────────────────────────────
+# Light explanatory captions rendered below each chart (st.caption).
+CAPTION_GROWTH_BAR = "Bar length shows the percentage change in the selected metric from the earliest to the latest date in the range."
+CAPTION_SIZE_BAR = "Number of companies in each market-cap bucket: Micro (< $50M), Small ($50M–$200M), Mid ($200M–$2B), Large (> $2B)."
+CAPTION_PE_FCF_SCATTER = "Each dot is a company. X = P/E ratio, Y = free cash flow yield. Dot size = market cap, colour = earnings yield. Hover a dot for details."
+CAPTION_DIVIDEND_BAR = "Top companies by grossed-up dividend yield — the pre-tax yield after including any franking credit."
+CAPTION_FRANKING_DIST = "Share of companies paying franked vs unfranked dividends."
+CAPTION_LIQUIDITY_SCATTER = "Each dot is a company. X = volume turnover, Y = bid-ask spread. Dot size = 52-week range position, colour = intraday volatility. Hover a dot for details."
+CAPTION_RANGE_HIST = "Where companies currently sit in their 52-week high–low range: left = near yearly low, right = near yearly high."
+CAPTION_TREND_LINE = "Line shows how the selected metric changes over the date range for each chosen stock. Hover a point for the exact value on that date."
+
 # ── Messages ────────────────────────────────────────────────────────
 
 MSG_DATA_LOAD_FAILED = "Failed to load data: {}"
@@ -298,9 +398,9 @@ MSG_TREND_COMPUTE_ERROR = "Error computing trend data: {}"
 # Markdown descriptions displayed above charts/tables
 DESC_DATA_LOADED = "**Data loaded:** {:,} records | **Symbols:** {} unique"
 DESC_SNAPSHOT_DATE = "**Snapshot date:** {}"
-DESC_VALUATION = "Company size and valuation multiples relative to share price."
-DESC_DIVIDEND = "Tax-adjusted dividend yields with franking credit benefits."
-DESC_LIQUIDITY = "Transaction costs, price positioning, and short-term volatility indicators."
+DESC_VALUATION = "Company size and valuation multiples relative to share price. Hover any column header for an explanation of each metric."
+DESC_DIVIDEND = "Tax-adjusted dividend yields with franking credit benefits. Hover column headers for definitions."
+DESC_LIQUIDITY = "Transaction costs, price positioning, and short-term volatility indicators. Hover column headers for definitions."
 
 # ── Theme Colors (read from .streamlit/config.toml) ─────────────────
 
