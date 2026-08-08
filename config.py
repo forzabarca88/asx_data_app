@@ -444,7 +444,7 @@ TREND_FACTOR_LABELS: dict[str, str] = {
 # ── API Client Config ───────────────────────────────────────────────
 
 # API base URL (overridable via ASX_API_BASE_URL env var)
-API_BASE_URL_DEFAULT = "http://localhost:30181"
+API_BASE_URL_DEFAULT = "http://192.168.0.50:30181"
 
 # Timeout constants: (connect_timeout, read_timeout)
 API_CONNECT_TIMEOUT = 10
