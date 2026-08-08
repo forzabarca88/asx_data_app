@@ -6,7 +6,6 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from data_processor import (
     calculate_top_n_growth,
-    prepare_trend_data,
     fetch_and_prepare_trend_data,
     engineer_features,
     detect_available_factors,
@@ -52,22 +51,6 @@ def test_growth_empty_and_na():
 
 
 # ── Trend Data Tests ───────────────────────────────────────────────
-
-
-def test_prepare_trend_data():
-    """Trend data filters to selected symbols and sorts chronologically."""
-    mock_df = pd.DataFrame({
-        "symbol": ["A", "A", "B", "B"],
-        "fetched_at": ["2024-06-01", "2024-12-01", "2024-03-01", "2024-09-01"],
-        "priceClose": [10.0, 15.0, 20.0, 25.0],
-    })
-
-    result = prepare_trend_data(mock_df, ["A"])
-    assert len(result) == 2
-    assert all(result["symbol"] == "A")
-    dates = pd.to_datetime(result["fetched_at"])
-    assert list(dates) == sorted(dates), "Dates should be sorted"
-    print("PASS: trend data filtering and sorting correct")
 
 
 def test_fetch_and_prepare_trend_data():
@@ -263,7 +246,6 @@ if __name__ == "__main__":
     tests = [
         test_calculate_top_n_growth,
         test_growth_empty_and_na,
-        test_prepare_trend_data,
         test_fetch_and_prepare_trend_data,
         test_fetch_and_prepare_empty,
         test_engineer_features_full,

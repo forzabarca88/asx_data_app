@@ -4,7 +4,9 @@ import time
 import requests
 import pandas as pd
 
-BASE_URL = os.environ.get("ASX_API_BASE_URL", "http://192.168.0.50:30181")
+from config import API_BASE_URL_DEFAULT
+
+BASE_URL = os.environ.get("ASX_API_BASE_URL", API_BASE_URL_DEFAULT)
 
 # Named timeout constants: (connect_timeout, read_timeout)
 CONNECT_TIMEOUT = 10
