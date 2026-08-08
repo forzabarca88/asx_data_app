@@ -276,7 +276,7 @@ if tab2.open:
                     column_config={
                         "symbol": st.column_config.TextColumn("Symbol"),
                         "Market cap ($M)": st.column_config.NumberColumn(
-                            "Market cap ($M)", format="$,.2f"
+                            "Market cap ($M)", format="$%.2f"
                         ),
                         "cleaned_pe": st.column_config.NumberColumn(
                             "P/E ratio", format="%.2f"
