@@ -17,6 +17,9 @@ Streamlit 1.60.0 DOM structure notes:
   hidden <span>. Click the outer [data-testid="stCheckbox"] div.
 - Multiselect: Selected items rendered as <span data-baseweb="tag"> elements
   with <span title="SYMBOL"> inside. Click to open, click option, Escape.
+  NOTE: To deselect, click the tag's delete icon (svg[title="Delete"]);
+  already-selected values are NOT listed as options in the reopened dropdown
+  (the dropdown only shows unselected options + "Select all").
 """
 
 import datetime
@@ -160,15 +163,21 @@ def _select_stock_in_sidebar(page, symbol: str) -> None:
 
 
 def _deselect_stock_in_sidebar(page, symbol: str) -> None:
-    """Deselect a stock from the sidebar multiselect."""
+    """Deselect a stock from the sidebar multiselect.
+
+    Already-selected values in a Streamlit multiselect are rendered as
+    removable tags (<span data-baseweb="tag">), NOT as options in the
+    dropdown (the reopened dropdown only lists unselected options). Each
+    tag contains an svg[title="Delete"] close icon; clicking it removes
+    the value.
+    """
     multiselect = page.locator("[data-testid='stMultiSelect']")
-    multiselect.click()
-    page.wait_for_timeout(500)
-
-    option = page.get_by_role("option", name=symbol)
-    option.click()
-
-    page.press("[data-testid='stMultiSelect']", "Escape")
+    tag = multiselect.locator(
+        "[data-baseweb='tag']",
+        has=page.locator(f"span[title='{symbol}']"),
+    )
+    tag.wait_for(state="visible", timeout=RERUN_TIMEOUT)
+    tag.locator("svg[title='Delete']").click()
     _wait_for_rerun(page)
 
 
