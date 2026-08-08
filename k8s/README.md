@@ -7,7 +7,6 @@ This directory contains Kubernetes manifests for deploying the ASX Stock Analysi
 - `Dockerfile` - Container definition for the Streamlit application
 - `deployment.yaml` - Kubernetes Deployment with 1 replica
 - `service.yaml` - NodePort Service to expose the application
-- `ingress.yaml` - Ingress configuration for domain-based routing
 
 ## Prerequisites
 
@@ -44,8 +43,7 @@ kubectl get ingress
 ## Access the Application
 
 Once deployed, access the dashboard via:
-- NodePort: `http://<NODE-IP>:30181`
-- Ingress domain: `http://asx-dashboard.example.com`
+- NodePort: `http://<NODE-IP>:30182`
 
 ## Scaling
 
@@ -54,12 +52,6 @@ To scale the application:
 ```bash
 kubectl scale deployment asx-dashboard --replicas=3
 ```
-
-## Resource Management
-
-The deployment includes resource requests and limits:
-- **Requests**: 256Mi memory, 250m CPU
-- **Limits**: 512Mi memory, 500m CPU
 
 Adjust these values based on your cluster capacity and application needs.
 

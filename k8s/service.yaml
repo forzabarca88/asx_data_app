@@ -9,7 +9,7 @@ spec:
   ports:
     - port: 8501
       targetPort: 8501
-      nodePort: 30181
+      nodePort: 30182
       protocol: TCP
       name: http
   selector:
